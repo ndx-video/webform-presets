@@ -1133,16 +1133,34 @@ function showSaveModal(formData) {
       return;
     }
 
-    // Filter form data to only include selected fields
+    // Build a map of all fields (including empty and hidden) for lookup
+    const allFieldsMap = new Map();
+    
+    // Add regular fields
+    formData.fieldList.forEach(field => {
+      allFieldsMap.set(field.name, field.value);
+    });
+    
+    // Add empty fields
+    formData.emptyFields.forEach(field => {
+      allFieldsMap.set(field.name, field.value);
+    });
+    
+    // Add hidden fields
+    formData.hiddenFields.forEach(field => {
+      allFieldsMap.set(field.name, field.value);
+    });
+    
+    // Filter to only include selected fields
     const filteredData = {};
     selectedFields.forEach(fieldName => {
-      if (formData.data[fieldName] !== undefined) {
-        filteredData[fieldName] = formData.data[fieldName];
+      if (allFieldsMap.has(fieldName)) {
+        filteredData[fieldName] = allFieldsMap.get(fieldName);
       }
     });
     
     console.log('Selected fields:', selectedFields);
-    console.log('Original form data:', formData.data);
+    console.log('All fields map:', allFieldsMap);
     console.log('Filtered data to save:', filteredData);
 
     // Send to background for encryption and storage
