@@ -297,6 +297,26 @@ async function handleFillPreset(presetIndex, mode) {
     // Get current tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
+    // First, ensure content script is loaded
+    try {
+      await chrome.tabs.sendMessage(tab.id, { action: 'getCurrentUrl' });
+    } catch (pingError) {
+      // Content script not loaded, inject it
+      console.log('Content script not loaded, injecting...');
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['scripts/utils.js', 'content.js']
+        });
+        // Wait a bit for initialization
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (injectError) {
+        console.error('Failed to inject content script:', injectError);
+        showNotification('Error', 'Cannot inject script on this page', 'error');
+        return;
+      }
+    }
+    
     // Send fill command to content script
     const response = await chrome.tabs.sendMessage(tab.id, {
       action: 'fillForm',
