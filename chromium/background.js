@@ -44,6 +44,8 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
  * Initialize the extension on first install
  */
 async function initializeExtension() {
+  console.log('[INIT] Initializing extension...');
+  
   // Create initial context menus
   await createContextMenus();
   
@@ -51,7 +53,7 @@ async function initializeExtension() {
   try {
     await syncDisabledDomains();
   } catch (error) {
-    console.warn('Could not sync disabled domains:', error);
+    console.warn('[INIT] Could not sync disabled domains:', error);
   }
   
   // Update for current tab if available
@@ -61,7 +63,7 @@ async function initializeExtension() {
       await updateContextMenusForPage(tabs[0].url);
     }
   } catch (error) {
-    console.warn('Could not update menus for current tab:', error);
+    console.warn('[INIT] Could not update menus for current tab:', error);
   }
   
   // Check if salt exists, if not create one
@@ -69,8 +71,12 @@ async function initializeExtension() {
   if (!userSalt) {
     const salt = crypto.randomUUID();
     await chrome.storage.local.set({ userSalt: salt });
-    console.log('Generated new user salt');
+    console.log('[INIT] Generated new user salt');
+  } else {
+    console.log('[INIT] User salt already exists');
   }
+  
+  console.log('[INIT] Extension initialization complete');
 }
 
 /**
@@ -615,8 +621,14 @@ async function handleUnlock(password, sendResponse) {
   try {
     const { userSalt, verificationToken } = await chrome.storage.local.get(['userSalt', 'verificationToken']);
     
+    console.log('[UNLOCK] Starting unlock process');
+    console.log('[UNLOCK] Salt exists:', !!userSalt);
+    console.log('[UNLOCK] Verification token exists:', !!verificationToken);
+    
     if (!userSalt) {
-      sendResponse({ success: false, error: 'No salt found' });
+      const errorMsg = 'No encryption salt found. Extension may not be properly initialized.';
+      console.error('[UNLOCK] ERROR:', errorMsg);
+      sendResponse({ success: false, error: errorMsg });
       return;
     }
     
@@ -625,6 +637,7 @@ async function handleUnlock(password, sendResponse) {
     
     // Verify key is correct if verification token exists
     if (verificationToken) {
+      console.log('[UNLOCK] Verifying password against existing collection');
       try {
         const testData = await crypto.subtle.decrypt(
           { name: 'AES-GCM', iv: new Uint8Array(verificationToken.iv) },
@@ -635,15 +648,19 @@ async function handleUnlock(password, sendResponse) {
         const testString = decoder.decode(testData);
         
         if (testString !== 'VERIFIED') {
+          console.warn('[UNLOCK] Password verification failed: incorrect password');
           sendResponse({ success: false, error: 'Incorrect password' });
           return;
         }
+        console.log('[UNLOCK] Password verified successfully');
       } catch (error) {
+        console.warn('[UNLOCK] Password verification failed:', error.message);
         sendResponse({ success: false, error: 'Incorrect password' });
         return;
       }
     } else {
       // First unlock - create verification token
+      console.log('[UNLOCK] First-time setup: creating new collection');
       const encoder = new TextEncoder();
       const testData = encoder.encode('VERIFIED');
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -660,10 +677,13 @@ async function handleUnlock(password, sendResponse) {
           encrypted: Array.from(new Uint8Array(encrypted))
         }
       });
+      console.log('[UNLOCK] First collection created successfully');
     }
     
     // Set the encryption key
     encryptionKey = key;
+    
+    console.log('[UNLOCK] Extension unlocked successfully');
     
     // Recreate context menus now that we're unlocked
     await createContextMenus();
@@ -686,8 +706,9 @@ async function handleUnlock(password, sendResponse) {
     
     sendResponse({ success: true });
   } catch (error) {
-    console.error('Unlock error:', error);
-    sendResponse({ success: false, error: error.message });
+    console.error('[UNLOCK] ERROR: Unlock failed:', error);
+    console.error('[UNLOCK] Error stack:', error.stack);
+    sendResponse({ success: false, error: `Unlock failed: ${error.message}` });
   }
 }
 
@@ -696,16 +717,24 @@ async function handleUnlock(password, sendResponse) {
  */
 async function handleCreateNewCollection(password, sendResponse) {
   try {
+    console.log('[CREATE_COLLECTION] Starting new collection creation');
+    
     // Get the salt
     const { userSalt } = await chrome.storage.local.get('userSalt');
     
     if (!userSalt) {
-      sendResponse({ success: false, error: 'No salt found' });
+      const errorMsg = 'No encryption salt found. Extension may not be properly initialized. Please reload the extension.';
+      console.error('[CREATE_COLLECTION] ERROR:', errorMsg);
+      sendResponse({ success: false, error: errorMsg });
       return;
     }
     
+    console.log('[CREATE_COLLECTION] Salt found, deriving key');
+    
     // Derive key from new password
     const key = await deriveKey(password, userSalt);
+    
+    console.log('[CREATE_COLLECTION] Key derived, creating verification token');
     
     // Create verification token for this new collection
     const encoder = new TextEncoder();
@@ -718,6 +747,8 @@ async function handleCreateNewCollection(password, sendResponse) {
       testData
     );
     
+    console.log('[CREATE_COLLECTION] Verification token created, storing to chrome.storage');
+    
     // Store the new verification token (this creates a new "collection")
     await chrome.storage.local.set({
       verificationToken: {
@@ -726,8 +757,12 @@ async function handleCreateNewCollection(password, sendResponse) {
       }
     });
     
+    console.log('[CREATE_COLLECTION] Verification token stored successfully');
+    
     // Set the encryption key
     encryptionKey = key;
+    
+    console.log('[CREATE_COLLECTION] Setting up context menus');
     
     // Recreate context menus
     await createContextMenus();
@@ -739,13 +774,15 @@ async function handleCreateNewCollection(password, sendResponse) {
         await updateContextMenusForPage(tabs[0].url);
       }
     } catch (error) {
-      console.warn('Could not update context menus after creating collection:', error);
+      console.warn('[CREATE_COLLECTION] Could not update context menus:', error);
     }
     
+    console.log('[CREATE_COLLECTION] New collection created successfully!');
     sendResponse({ success: true });
   } catch (error) {
-    console.error('Create collection error:', error);
-    sendResponse({ success: false, error: error.message });
+    console.error('[CREATE_COLLECTION] ERROR: Failed to create collection:', error);
+    console.error('[CREATE_COLLECTION] Error stack:', error.stack);
+    sendResponse({ success: false, error: `Failed to create collection: ${error.message}` });
   }
 }
 

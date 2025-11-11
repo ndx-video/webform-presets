@@ -229,9 +229,14 @@ async function handleUnlock(event) {
       localOnlyMode: localOnlyMode
     });
     
+    console.log('[UNLOCK_UI] Attempting unlock...');
+    console.log('[UNLOCK_UI] Local-only mode:', localOnlyMode);
+    
     // Check if this is first time setup (no collections exist)
     const result = await chrome.storage.local.get(['verificationToken']);
     const isFirstTime = !result.verificationToken;
+    
+    console.log('[UNLOCK_UI] First time setup:', isFirstTime);
     
     const response = await chrome.runtime.sendMessage({
       action: 'unlock',
@@ -240,6 +245,7 @@ async function handleUnlock(event) {
     
     if (response.success) {
       // Success! Show success message and close
+      console.log('[UNLOCK_UI] Unlock successful!');
       showSuccess();
       setTimeout(async () => {
         // Check if we should return to a specific page
@@ -269,11 +275,16 @@ async function handleUnlock(event) {
       }, 1000);
     } else {
       // Failed - check if this is first time or wrong password for existing collection
+      console.error('[UNLOCK_UI] Unlock failed:', response.error);
+      
       if (isFirstTime) {
-        // Shouldn't happen in first time setup, but just in case
-        showError('Failed to create collection. Please try again.');
+        // First time setup failed - this is unusual, show detailed error
+        const errorMsg = response.error || 'Failed to create collection';
+        console.error('[UNLOCK_UI] First-time setup failed:', errorMsg);
+        showError(`Setup Error: ${errorMsg}`);
       } else {
         // Wrong password - offer to create new collection or try again
+        console.log('[UNLOCK_UI] Wrong password, showing new collection prompt');
         showNewCollectionPrompt();
       }
       
@@ -281,8 +292,9 @@ async function handleUnlock(event) {
       passwordInput.focus();
     }
   } catch (error) {
-    console.error('Error unlocking:', error);
-    showError('An error occurred while unlocking. Please try again.');
+    console.error('[UNLOCK_UI] ERROR: Exception during unlock:', error);
+    console.error('[UNLOCK_UI] Error stack:', error.stack);
+    showError(`Error: ${error.message}. Please check the console for details.`);
   } finally {
     unlockBtn.disabled = false;
     unlockBtn.textContent = 'Unlock';
@@ -294,11 +306,15 @@ async function handleUnlock(event) {
  */
 async function handleCreateNewCollection() {
   if (!currentPassword) {
-    showError('Password not available. Please try unlocking again.');
+    const errorMsg = 'Password not available. Please try unlocking again.';
+    console.error('[CREATE_COLLECTION_UI] ERROR:', errorMsg);
+    showError(errorMsg);
     return;
   }
   
   try {
+    console.log('[CREATE_COLLECTION_UI] Starting new collection creation...');
+    
     const unlockBtn = document.getElementById('unlock-btn');
     unlockBtn.disabled = true;
     unlockBtn.textContent = 'Creating Collection...';
@@ -311,15 +327,21 @@ async function handleCreateNewCollection() {
       password: currentPassword
     });
     
+    console.log('[CREATE_COLLECTION_UI] Response received:', response);
+    
     if (response.success) {
+      console.log('[CREATE_COLLECTION_UI] Collection created successfully!');
       showSuccess();
       setTimeout(() => window.close(), 1000);
     } else {
-      showError('Failed to create new collection: ' + (response.error || 'Unknown error'));
+      const errorMsg = response.error || 'Unknown error occurred';
+      console.error('[CREATE_COLLECTION_UI] Failed to create collection:', errorMsg);
+      showError(`Failed to create collection: ${errorMsg}`);
     }
   } catch (error) {
-    console.error('Error creating new collection:', error);
-    showError('An error occurred while creating the collection.');
+    console.error('[CREATE_COLLECTION_UI] ERROR: Exception during collection creation:', error);
+    console.error('[CREATE_COLLECTION_UI] Error stack:', error.stack);
+    showError(`Error creating collection: ${error.message}. Check console for details.`);
   } finally {
     document.getElementById('unlock-btn').disabled = false;
     document.getElementById('unlock-btn').textContent = 'Unlock';
