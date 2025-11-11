@@ -402,8 +402,17 @@ async function handleReset() {
       resetBtn.disabled = true;
       resetBtn.textContent = 'Deleting...';
       
+      // Preserve the salt before clearing
+      const { userSalt } = await chrome.storage.local.get('userSalt');
+      
       // Clear all storage
       await chrome.storage.local.clear();
+      
+      // Restore the salt
+      if (userSalt) {
+        await chrome.storage.local.set({ userSalt });
+        console.log('[RESET] Salt preserved after deletion');
+      }
       
       // Show success and reload
       showSuccess('All collections deleted. Creating new collection...');

@@ -141,8 +141,17 @@ async function handleDeleteAll() {
   } else {
     // Second click: actually delete
     try {
+      // Preserve the salt before clearing
+      const { userSalt } = await chrome.storage.local.get('userSalt');
+      
       // Clear all chrome storage
       await chrome.storage.local.clear();
+      
+      // Restore the salt
+      if (userSalt) {
+        await chrome.storage.local.set({ userSalt });
+        console.log('[DELETE_ALL] Salt preserved after deletion');
+      }
       
       // Send message to background to reset
       await chrome.runtime.sendMessage({ action: 'lock' });

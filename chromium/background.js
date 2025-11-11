@@ -619,17 +619,18 @@ async function handleMessage(message, sender, sendResponse) {
  */
 async function handleUnlock(password, sendResponse) {
   try {
-    const { userSalt, verificationToken } = await chrome.storage.local.get(['userSalt', 'verificationToken']);
+    let { userSalt, verificationToken } = await chrome.storage.local.get(['userSalt', 'verificationToken']);
     
     console.log('[UNLOCK] Starting unlock process');
     console.log('[UNLOCK] Salt exists:', !!userSalt);
     console.log('[UNLOCK] Verification token exists:', !!verificationToken);
     
+    // If salt is missing, create one (handles case where storage was cleared)
     if (!userSalt) {
-      const errorMsg = 'No encryption salt found. Extension may not be properly initialized.';
-      console.error('[UNLOCK] ERROR:', errorMsg);
-      sendResponse({ success: false, error: errorMsg });
-      return;
+      console.warn('[UNLOCK] Salt missing, creating new salt');
+      userSalt = crypto.randomUUID();
+      await chrome.storage.local.set({ userSalt });
+      console.log('[UNLOCK] New salt created');
     }
     
     // Derive key
@@ -724,14 +725,14 @@ async function handleCreateNewCollection(password, sendResponse) {
   try {
     console.log('[CREATE_COLLECTION] Starting new collection creation');
     
-    // Get the salt
-    const { userSalt } = await chrome.storage.local.get('userSalt');
+    // Get the salt, create if missing
+    let { userSalt } = await chrome.storage.local.get('userSalt');
     
     if (!userSalt) {
-      const errorMsg = 'No encryption salt found. Extension may not be properly initialized. Please reload the extension.';
-      console.error('[CREATE_COLLECTION] ERROR:', errorMsg);
-      sendResponse({ success: false, error: errorMsg });
-      return;
+      console.warn('[CREATE_COLLECTION] Salt missing, creating new salt');
+      userSalt = crypto.randomUUID();
+      await chrome.storage.local.set({ userSalt });
+      console.log('[CREATE_COLLECTION] New salt created');
     }
     
     console.log('[CREATE_COLLECTION] Salt found, deriving key');
