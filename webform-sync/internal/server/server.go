@@ -99,6 +99,12 @@ func (s *Server) setupRouter() {
 	// Scope-based retrieval
 	api.HandleFunc("/presets/scope/{type}/{value}", s.handleGetPresetsByScope).Methods("GET")
 
+	// Disabled domains endpoints
+	api.HandleFunc("/disabled-domains", s.handleGetDisabledDomains).Methods("GET")
+	api.HandleFunc("/disabled-domains/{domain}", s.handleDisableDomain).Methods("POST")
+	api.HandleFunc("/disabled-domains/{domain}", s.handleEnableDomain).Methods("DELETE")
+	api.HandleFunc("/disabled-domains/{domain}/status", s.handleCheckDomainStatus).Methods("GET")
+
 	// Device management
 	api.HandleFunc("/devices", s.handleGetDevices).Methods("GET")
 

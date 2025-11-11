@@ -93,6 +93,17 @@ func (s *Storage) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_presets_device ON presets(device_id);
 	CREATE INDEX IF NOT EXISTS idx_presets_last_used ON presets(last_used);
 
+	CREATE TABLE IF NOT EXISTS disabled_domains (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		domain TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		UNIQUE(domain, session_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_disabled_domains_session ON disabled_domains(session_id);
+	CREATE INDEX IF NOT EXISTS idx_disabled_domains_domain ON disabled_domains(domain);
+
 	CREATE TABLE IF NOT EXISTS sync_log (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		preset_id TEXT NOT NULL,
@@ -395,6 +406,77 @@ func (s *Storage) GetDevices() ([]string, error) {
 	}
 
 	return devices, rows.Err()
+}
+
+// DisableDomain adds a domain to the disabled list for a session
+func (s *Storage) DisableDomain(domain, sessionID string) error {
+	_, err := s.db.Exec(`
+		INSERT OR IGNORE INTO disabled_domains (domain, session_id, created_at)
+		VALUES (?, ?, ?)
+	`, domain, sessionID, time.Now())
+
+	if err != nil {
+		return fmt.Errorf("failed to disable domain: %w", err)
+	}
+
+	s.logger.Info("Domain disabled: %s for session %s", domain, sessionID)
+	return nil
+}
+
+// EnableDomain removes a domain from the disabled list for a session
+func (s *Storage) EnableDomain(domain, sessionID string) error {
+	result, err := s.db.Exec(`
+		DELETE FROM disabled_domains
+		WHERE domain = ? AND session_id = ?
+	`, domain, sessionID)
+
+	if err != nil {
+		return fmt.Errorf("failed to enable domain: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	s.logger.Info("Domain enabled: %s for session %s (rows affected: %d)", domain, sessionID, rowsAffected)
+	return nil
+}
+
+// IsDomaindDisabled checks if a domain is disabled for a session
+func (s *Storage) IsDomainDisabled(domain, sessionID string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM disabled_domains
+		WHERE domain = ? AND session_id = ?
+	`, domain, sessionID).Scan(&count)
+
+	if err != nil {
+		return false, fmt.Errorf("failed to check domain status: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// GetDisabledDomains returns all disabled domains for a session
+func (s *Storage) GetDisabledDomains(sessionID string) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT domain FROM disabled_domains
+		WHERE session_id = ?
+		ORDER BY created_at DESC
+	`, sessionID)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query disabled domains: %w", err)
+	}
+	defer rows.Close()
+
+	var domains []string
+	for rows.Next() {
+		var domain string
+		if err := rows.Scan(&domain); err != nil {
+			return nil, fmt.Errorf("failed to scan domain: %w", err)
+		}
+		domains = append(domains, domain)
+	}
+
+	return domains, rows.Err()
 }
 
 // Close closes the database connection

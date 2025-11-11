@@ -411,3 +411,101 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
+
+// ============================================================================
+// DISABLED DOMAINS HANDLERS
+// ============================================================================
+
+// handleGetDisabledDomains returns all disabled domains for a session
+func (s *Server) handleGetDisabledDomains(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		s.respondError(w, http.StatusBadRequest, "sessionId parameter is required")
+		return
+	}
+
+	domains, err := s.storage.GetDisabledDomains(sessionID)
+	if err != nil {
+		s.logger.Error("Failed to get disabled domains: %v", err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to retrieve disabled domains")
+		return
+	}
+
+	s.respondSuccess(w, map[string]interface{}{
+		"domains": domains,
+	}, fmt.Sprintf("Retrieved %d disabled domains", len(domains)))
+}
+
+// handleDisableDomain adds a domain to the disabled list
+func (s *Server) handleDisableDomain(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	domain := vars["domain"]
+
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		s.respondError(w, http.StatusBadRequest, "sessionId parameter is required")
+		return
+	}
+
+	if err := s.storage.DisableDomain(domain, sessionID); err != nil {
+		s.logger.Error("Failed to disable domain %s: %v", domain, err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to disable domain")
+		return
+	}
+
+	s.respondSuccess(w, map[string]interface{}{
+		"domain":    domain,
+		"sessionId": sessionID,
+		"disabled":  true,
+	}, fmt.Sprintf("Domain %s disabled", domain))
+}
+
+// handleEnableDomain removes a domain from the disabled list
+func (s *Server) handleEnableDomain(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	domain := vars["domain"]
+
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		s.respondError(w, http.StatusBadRequest, "sessionId parameter is required")
+		return
+	}
+
+	if err := s.storage.EnableDomain(domain, sessionID); err != nil {
+		s.logger.Error("Failed to enable domain %s: %v", domain, err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to enable domain")
+		return
+	}
+
+	s.respondSuccess(w, map[string]interface{}{
+		"domain":    domain,
+		"sessionId": sessionID,
+		"disabled":  false,
+	}, fmt.Sprintf("Domain %s enabled", domain))
+}
+
+// handleCheckDomainStatus checks if a domain is disabled
+func (s *Server) handleCheckDomainStatus(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	domain := vars["domain"]
+
+	sessionID := r.URL.Query().Get("sessionId")
+	if sessionID == "" {
+		s.respondError(w, http.StatusBadRequest, "sessionId parameter is required")
+		return
+	}
+
+	disabled, err := s.storage.IsDomainDisabled(domain, sessionID)
+	if err != nil {
+		s.logger.Error("Failed to check domain status for %s: %v", domain, err)
+		s.respondError(w, http.StatusInternalServerError, "Failed to check domain status")
+		return
+	}
+
+	s.respondSuccess(w, map[string]interface{}{
+		"domain":    domain,
+		"sessionId": sessionID,
+		"disabled":  disabled,
+		"enabled":   !disabled,
+	}, "Domain status retrieved")
+}
