@@ -13,7 +13,12 @@ chromium/
 ├── options.html           # Management console
 ├── unlock.html            # Master password unlock page
 ├── icons/                 # Extension icons (16x16, 32x32, 48x48, 128x128)
-│   └── icon*.png         # TODO: Add actual icon files
+│   ├── icon16.png        
+│   ├── icon32.png        
+│   ├── icon48.png        
+│   └── icon128.png       
+├── lib/                   # Third-party libraries
+│   └── jszip.min.js      # JSZip 3.10.1 for export/import
 ├── scripts/
 │   ├── popup.js          # Popup logic
 │   ├── options.js        # Management console logic
