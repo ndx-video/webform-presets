@@ -1,8 +1,26 @@
 specVersion: "1.0.0"
 projectName: "Webform Presets"
-projectDescription: "A browser extension to save and fill webform data, excluding passwords. It prioritizes local storage, strong encryption, and user control."
+projectDescription: "A browser extension to save and fill webform data, excluding passwords. It prioritizes local storage, strong encryption, and user control. Includes an optional local sync service for cross-device synchronization."
 targetPlatform: "Chromium (MVP)"
 repository: "https://github.com/tezza1971/webform-presets"
+
+# ==============================================================================
+# PROJECT STRUCTURE
+# ==============================================================================
+
+projectStructure:
+  chromium:
+    path: "./chromium/"
+    description: "Browser extension for Chromium-based browsers (Chrome, Edge, Brave)"
+    type: "Manifest V3 Extension"
+    
+  webformSync:
+    path: "./webform-sync/"
+    description: "Optional local HTTP sync service written in Go"
+    type: "Standalone Service"
+    spec: "webform-sync/spec.yml"
+    status: "Implemented"
+    integration: "Browser extension can sync encrypted presets via local REST API"
 
 # ==============================================================================
 # CORE: SECURITY & STORAGE
@@ -421,13 +439,61 @@ architecture:
         
     unlock:
       file: "unlock.html"
-      description: "Dedicated page for password entry"
+      description: "Dedicated page for password entry and sync configuration"
       features:
         - "Single password input field"
         - "Compatible with password managers"
         - "Key derivation on submit"
         - "Error handling for incorrect passwords"
+        - "Sync service configuration (host and port)"
+        - "Connection test button for sync service"
+        - "Link to webform-sync setup documentation"
         
+  syncIntegration:
+    service: "webform-sync"
+    location: "../webform-sync/"
+    optional: true
+    description: "Local HTTP service for syncing encrypted presets across devices and browsers"
+    
+    configuration:
+      location: "unlock.html (sync service configuration section)"
+      settings:
+        - name: "host"
+          type: "text"
+          default: "localhost"
+          description: "Hostname or IP of sync service"
+        - name: "port"
+          type: "number"
+          default: 8765
+          description: "Port number of sync service"
+      storage: "chrome.storage.local (syncHost, syncPort)"
+      
+    capabilities:
+      - "Save encrypted presets to local database"
+      - "Retrieve presets from any device running the sync service"
+      - "Share presets across multiple browsers on same machine"
+      - "Optional network sharing (configure IP whitelist)"
+      
+    dataFlow:
+      save:
+        - "Extension encrypts preset data with master password"
+        - "POST /api/v1/presets with encryptedFields"
+        - "Service stores in SQLite database"
+        - "Service returns success confirmation"
+        
+      retrieve:
+        - "Extension requests presets by scope or device ID"
+        - "GET /api/v1/presets?device_id={id}"
+        - "Service returns encrypted data"
+        - "Extension decrypts with master password"
+        
+    security:
+      - "Service runs on localhost by default"
+      - "IP whitelist restricts network access"
+      - "URL filtering prevents unauthorized domains"
+      - "Data encrypted end-to-end (service stores encrypted blobs)"
+      - "No authentication required for localhost access"
+      
   libraries:
     cryptography:
       recommended: "Web Crypto API (built into browsers)"

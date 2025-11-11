@@ -1,0 +1,561 @@
+# Webform Sync Service - Technical Specification
+# Version: 1.0.0
+# Last Updated: 2025-11-11
+
+project:
+  name: webform-sync
+  version: 1.0.0
+  description: Local HTTP sync service for Webform Presets browser extension
+  purpose: >
+    Provides a local REST API for syncing encrypted webform preset data across
+    devices and browsers. Runs as a localhost service with optional IP filtering
+    and URL whitelisting for security.
+  
+  repository: https://github.com/tezza1971/webform-presets
+  path: webform-sync/
+  language: Go
+  go_version: ">=1.21"
+
+architecture:
+  type: standalone_http_service
+  pattern: layered_architecture
+  
+  layers:
+    - name: cmd
+      description: Application entry point and initialization
+      path: cmd/webform-sync/
+      
+    - name: internal/config
+      description: Configuration management from YAML file
+      path: internal/config/
+      
+    - name: internal/logger
+      description: Structured logging with file rotation
+      path: internal/logger/
+      
+    - name: internal/storage
+      description: SQLite database persistence layer
+      path: internal/storage/
+      
+    - name: internal/server
+      description: HTTP server and request handlers
+      path: internal/server/
+
+dependencies:
+  required:
+    - package: github.com/gorilla/mux
+      version: v1.8.1
+      purpose: HTTP router with path parameter support
+      
+    - package: github.com/rs/cors
+      version: v1.11.1
+      purpose: CORS middleware for browser extension access
+      
+    - package: github.com/mattn/go-sqlite3
+      version: v1.14.24
+      purpose: SQLite3 driver with CGO
+      build_requirements:
+        cgo_enabled: true
+        compiler: "GCC (Windows: MSYS2 MinGW-w64, Linux/Mac: gcc)"
+      
+    - package: gopkg.in/yaml.v3
+      version: v3.0.1
+      purpose: YAML configuration parsing
+      
+    - package: gopkg.in/natefinch/lumberjack.v2
+      version: v2.2.1
+      purpose: Log file rotation
+
+database:
+  engine: SQLite3
+  file: data/presets.db
+  
+  schema:
+    presets:
+      columns:
+        - name: id
+          type: TEXT
+          constraints: PRIMARY KEY
+          description: UUID v4 preset identifier
+          
+        - name: device_id
+          type: TEXT
+          constraints: NOT NULL
+          description: Device identifier for ownership
+          indexed: true
+          
+        - name: name
+          type: TEXT
+          constraints: NOT NULL
+          description: User-friendly preset name
+          
+        - name: scope_type
+          type: TEXT
+          constraints: NOT NULL
+          description: "Scope type: 'url' or 'domain'"
+          
+        - name: scope_value
+          type: TEXT
+          constraints: NOT NULL
+          description: URL or domain pattern
+          indexed: true
+          
+        - name: fields
+          type: TEXT
+          constraints: NOT NULL
+          description: JSON-encoded form field data (plaintext)
+          
+        - name: encrypted_fields
+          type: TEXT
+          description: JSON-encoded encrypted field data (encrypted)
+          note: Browser extension sends encrypted data
+          
+        - name: created_at
+          type: DATETIME
+          constraints: DEFAULT CURRENT_TIMESTAMP
+          
+        - name: updated_at
+          type: DATETIME
+          constraints: DEFAULT CURRENT_TIMESTAMP
+          
+        - name: last_used
+          type: DATETIME
+          description: Last time preset was accessed
+          
+        - name: use_count
+          type: INTEGER
+          constraints: DEFAULT 0
+          
+      indexes:
+        - name: idx_device_scope
+          columns: [device_id, scope_type, scope_value]
+          type: composite
+          purpose: Fast preset lookup by device and scope
+
+api:
+  protocol: HTTP/1.1
+  base_path: /api/v1
+  default_port: 8765
+  fallback_ports: [8766, 8767, 8768]
+  
+  content_type: application/json
+  
+  security:
+    cors:
+      enabled: true
+      allowed_origins: ["*"]
+      allowed_methods: [GET, POST, PUT, DELETE, OPTIONS]
+      allowed_headers: [Content-Type, Authorization]
+      
+    ip_filtering:
+      mode: whitelist
+      default_whitelist:
+        - 127.0.0.1
+        - ::1
+        - 172.17.0.0/16  # Docker bridge network
+        - 192.168.0.0/16 # Local networks
+        
+    url_filtering:
+      enabled: true
+      whitelist_file: whitelist.txt
+      blacklist_file: blacklist.txt
+      pattern_type: regex
+      
+  endpoints:
+    - path: /health
+      method: GET
+      description: Health check endpoint
+      response:
+        success: true
+        data:
+          status: ok
+          version: 1.0.0
+          uptime: "123ns"
+          
+    - path: /presets
+      method: GET
+      description: List all presets for a device
+      query_params:
+        - name: device_id
+          type: string
+          required: true
+          
+    - path: /presets
+      method: POST
+      description: Create a new preset
+      request_body:
+        deviceId: string (required)
+        name: string (required)
+        scopeType: string (required, "url" or "domain")
+        scopeValue: string (required)
+        fields: object (optional, plaintext)
+        encryptedFields: string (optional, encrypted JSON)
+        encrypted: boolean (optional, default false)
+        
+    - path: /presets/{id}
+      method: GET
+      description: Get a specific preset
+      path_params:
+        - name: id
+          type: string
+          required: true
+      query_params:
+        - name: device_id
+          type: string
+          required: true
+          
+    - path: /presets/{id}
+      method: PUT
+      description: Update a preset
+      path_params:
+        - name: id
+          type: string
+          required: true
+      request_body:
+        deviceId: string (required)
+        name: string (optional)
+        fields: object (optional)
+        encryptedFields: string (optional)
+        
+    - path: /presets/{id}
+      method: DELETE
+      description: Delete a preset
+      path_params:
+        - name: id
+          type: string
+          required: true
+      query_params:
+        - name: device_id
+          type: string
+          required: true
+          
+    - path: /presets/scope/{scope_type}/{scope_value}
+      method: GET
+      description: Get presets by scope
+      path_params:
+        - name: scope_type
+          type: string
+          values: [url, domain]
+        - name: scope_value
+          type: string
+          note: URL-encoded
+          
+    - path: /devices
+      method: GET
+      description: List all device IDs in database
+      
+    - path: /sync/log
+      method: GET
+      description: Get sync operation log
+      query_params:
+        - name: limit
+          type: integer
+          default: 100
+          
+    - path: /sync/cleanup
+      method: POST
+      description: Clean up old/unused presets
+      request_body:
+        days: integer (default 90)
+
+configuration:
+  file: webform-sync.yml
+  format: YAML
+  
+  sections:
+    server:
+      port: 8765
+      host: "0.0.0.0"
+      fallback_ports: [8766, 8767, 8768]
+      read_timeout: 10
+      write_timeout: 10
+      
+    access_control:
+      mode: whitelist|blacklist|allow_all
+      whitelist: [array of IP/CIDR]
+      blacklist: [array of IP/CIDR]
+      
+    url_filter:
+      enabled: true
+      whitelist_file: whitelist.txt
+      blacklist_file: blacklist.txt
+      use_regex: true
+      whitelist_overrides: true
+      
+    storage:
+      data_dir: ./data
+      db_file: presets.db
+      encrypt_at_rest: false
+      backup:
+        enabled: true
+        interval_hours: 24
+        max_backups: 7
+        
+    logging:
+      level: info|debug|warn|error
+      output: console|file|both
+      log_file: ./logs/webform-sync.log
+      max_size_mb: 10
+      max_backups: 5
+      max_age_days: 30
+      log_requests: true
+      
+    cors:
+      enabled: true
+      allowed_origins: ["*"]
+      allowed_methods: [GET, POST, PUT, DELETE, OPTIONS]
+      allowed_headers: [Content-Type, Authorization]
+      max_age: 3600
+      
+    performance:
+      max_concurrent_requests: 100
+      rate_limit: 60
+      enable_compression: true
+      cache:
+        enabled: true
+        ttl_seconds: 300
+        max_entries: 1000
+        
+    maintenance:
+      auto_cleanup: true
+      delete_after_days: 365
+      cleanup_interval_hours: 168
+
+build:
+  platforms:
+    - os: windows
+      arch: amd64
+      binary: webform-sync.exe
+      script: build.ps1
+      requirements:
+        - MSYS2 with MinGW-w64
+        - GCC 15.2.0+
+      environment:
+        CGO_ENABLED: "1"
+        
+    - os: linux
+      arch: amd64
+      binary: webform-sync
+      script: Makefile
+      requirements:
+        - gcc
+        - libsqlite3-dev
+      environment:
+        CGO_ENABLED: "1"
+        
+    - os: darwin
+      arch: amd64
+      binary: webform-sync
+      script: Makefile
+      requirements:
+        - Xcode Command Line Tools
+      environment:
+        CGO_ENABLED: "1"
+        
+  docker:
+    base_image: golang:1.21
+    runtime_image: debian:bookworm-slim
+    
+    build_process:
+      - Install build dependencies (gcc, g++, libsqlite3-dev)
+      - Copy source code
+      - Download Go modules
+      - Build with CGO_ENABLED=1
+      - Copy binary to runtime image
+      - Install runtime dependencies (sqlite3, libsqlite3-0)
+      - Create non-root user
+      - Set working directory
+      
+    notes: >
+      Alpine Linux is NOT compatible due to musl libc lacking pread64/pwrite64
+      functions required by go-sqlite3. Use Debian-based images.
+      
+    final_image_size: ~114MB
+    
+    compose:
+      services:
+        - webform-sync
+      ports:
+        - "8765:8765"
+      volumes:
+        - ./data:/app/data
+        - ./logs:/app/logs
+      healthcheck:
+        test: wget --spider http://localhost:8765/api/v1/health
+        interval: 30s
+        timeout: 3s
+        retries: 3
+
+testing:
+  test_suite: test-api.ps1
+  test_count: 20
+  
+  test_categories:
+    - name: Health and Connectivity
+      tests: 1
+      
+    - name: CRUD Operations
+      tests: 10
+      description: Create, Read, Update, Delete presets
+      
+    - name: Scope Filtering
+      tests: 3
+      description: URL and domain-based preset filtering
+      
+    - name: URL Validation
+      tests: 2
+      description: Whitelist/blacklist enforcement
+      
+    - name: Error Handling
+      tests: 2
+      description: Invalid inputs and edge cases
+      
+    - name: Performance
+      tests: 1
+      description: Concurrent request handling
+      
+    - name: Maintenance
+      tests: 1
+      description: Cleanup operations
+      
+  current_pass_rate: 65% (13/20)
+  
+  known_issues:
+    - URL path parameter routing with special characters
+    - Some edge case validations
+
+deployment:
+  environments:
+    - name: local_development
+      method: native_binary
+      steps:
+        - Build with build.ps1 or make
+        - Edit webform-sync.yml
+        - Run ./webform-sync or webform-sync.exe
+        
+    - name: local_docker
+      method: docker_compose
+      steps:
+        - docker-compose up -d
+        - Configure browser extension with localhost:8765
+        
+    - name: network_shared
+      method: docker_or_native
+      notes: >
+        Update IP whitelist to include network ranges.
+        Use 0.0.0.0 as host binding.
+        Configure firewall rules.
+        
+  security_considerations:
+    - Runs on localhost by default
+    - IP whitelist restricts access
+    - URL filtering prevents unauthorized domains
+    - No built-in authentication (relies on network security)
+    - Encrypted data stored in browser, plaintext in service
+    - Should NOT be exposed to public internet
+
+integration:
+  browser_extension:
+    name: Webform Presets
+    location: ../chromium/
+    
+    configuration:
+      - User configures host and port in unlock.html
+      - Default: localhost:8765
+      - Settings saved in chrome.storage.local
+      
+    data_flow:
+      save_preset:
+        1. User saves form data in browser
+        2. Extension encrypts field data with master password
+        3. POST /presets with encryptedFields
+        4. Service stores in SQLite
+        
+      fill_preset:
+        1. User selects preset from context menu
+        2. Extension requests preset data
+        3. GET /presets/{id}?device_id={id}
+        4. Extension decrypts fields
+        5. Fields injected into page
+        
+  device_identification:
+    method: UUID v4
+    generation: Browser extension generates on first use
+    storage: chrome.storage.local
+    uniqueness: Per browser profile
+    
+maintenance:
+  logs:
+    location: ./logs/webform-sync.log
+    format: "[LEVEL] YYYY/MM/DD HH:MM:SS message"
+    rotation: 10MB max size
+    retention: 5 files, 30 days
+    
+  database:
+    location: ./data/presets.db
+    backup: Automated via config
+    manual_backup: Copy presets.db file
+    migration: Not yet implemented
+    
+  monitoring:
+    health_endpoint: /api/v1/health
+    metrics: Uptime, version
+    logs: Request/response logging available
+
+troubleshooting:
+  common_issues:
+    - issue: "Port already in use"
+      solution: Service tries fallback ports automatically
+      
+    - issue: "Connection refused"
+      solution: >
+        Check service is running, verify host is 0.0.0.0,
+        check firewall rules
+        
+    - issue: "Database locked"
+      solution: Close other connections, restart service
+      
+    - issue: "CGO compilation errors"
+      solution: >
+        Windows: Install MSYS2 MinGW-w64
+        Linux: Install gcc and libsqlite3-dev
+        Docker: Use Debian-based images, not Alpine
+        
+    - issue: "Context menus not updating"
+      solution: Lock and unlock extension to refresh
+
+documentation:
+  files:
+    - README.md: Overview and quick start
+    - QUICKSTART.md: Rapid deployment guide
+    - BUILD_WINDOWS.md: Windows build instructions
+    - TEST_RESULTS.md: Test execution results
+    - IMPLEMENTATION_SUMMARY.md: Technical details
+    - spec.yml: This file
+    
+  external:
+    - GitHub: https://github.com/tezza1971/webform-presets/tree/main/webform-sync
+
+development:
+  code_structure:
+    - Clean architecture with separation of concerns
+    - Dependency injection for testability
+    - Error handling with detailed logging
+    - Context-based request handling
+    - Graceful shutdown with 30s timeout
+    
+  coding_standards:
+    - Go standard formatting (gofmt)
+    - Exported functions with doc comments
+    - Error returns, no panics in handlers
+    - Structured logging
+    - SQL prepared statements
+    
+  future_enhancements:
+    - Authentication/authorization
+    - End-to-end encryption
+    - Multi-user support
+    - Conflict resolution
+    - Database migration system
+    - WebSocket support for real-time sync
+    - Metrics and monitoring dashboard
