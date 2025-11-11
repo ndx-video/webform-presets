@@ -44,8 +44,25 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
  * Initialize the extension on first install
  */
 async function initializeExtension() {
-  // Create context menus
+  // Create initial context menus
   await createContextMenus();
+  
+  // Sync disabled domains from service if available
+  try {
+    await syncDisabledDomains();
+  } catch (error) {
+    console.warn('Could not sync disabled domains:', error);
+  }
+  
+  // Update for current tab if available
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs.length > 0 && tabs[0].url) {
+      await updateContextMenusForPage(tabs[0].url);
+    }
+  } catch (error) {
+    console.warn('Could not update menus for current tab:', error);
+  }
   
   // Check if salt exists, if not create one
   const { userSalt } = await chrome.storage.local.get('userSalt');
@@ -63,60 +80,33 @@ async function createContextMenus() {
   // Remove all existing menus first
   await chrome.contextMenus.removeAll();
   
-  // Main menu
-  chrome.contextMenus.create({
-    id: 'webform-presets-main',
-    title: 'Webform Presets',
-    contexts: ['page', 'editable']
-  });
+  // Check if extension is unlocked
+  if (!encryptionKey) {
+    // Show only Unlock option when locked
+    chrome.contextMenus.create({
+      id: 'unlock-extension',
+      title: '🔒 Unlock Webform Presets',
+      contexts: ['page', 'editable']
+    });
+    return;
+  }
   
-  // Save submenu
+  // When unlocked, show flat menu structure
+  // Save option
   chrome.contextMenus.create({
     id: 'save-preset',
-    parentId: 'webform-presets-main',
-    title: 'Save as Preset...',
-    contexts: ['page', 'editable']
-  });
-  
-  // Separator
-  chrome.contextMenus.create({
-    id: 'separator-1',
-    parentId: 'webform-presets-main',
-    type: 'separator',
-    contexts: ['page', 'editable']
-  });
-  
-  // Fill submenu placeholder (will be populated dynamically)
-  chrome.contextMenus.create({
-    id: 'fill-preset-parent',
-    parentId: 'webform-presets-main',
-    title: 'Fill with...',
-    contexts: ['page', 'editable']
-  });
-  
-  chrome.contextMenus.create({
-    id: 'no-presets',
-    parentId: 'fill-preset-parent',
-    title: 'No presets available',
-    enabled: false,
-    contexts: ['page', 'editable']
-  });
-  
-  // Separator
-  chrome.contextMenus.create({
-    id: 'separator-2',
-    parentId: 'webform-presets-main',
-    type: 'separator',
+    title: '💾 Save Webform Preset',
     contexts: ['page', 'editable']
   });
   
   // Manage presets
   chrome.contextMenus.create({
     id: 'manage-presets',
-    parentId: 'webform-presets-main',
-    title: 'Manage Presets',
+    title: '⚙️ Manage Webform Presets',
     contexts: ['page', 'editable']
   });
+  
+  // Preset items will be added dynamically by updateContextMenusForPage
 }
 
 /**
@@ -131,35 +121,84 @@ async function updateContextMenusForPage(url) {
     const urlObj = new URL(url);
     const domain = urlObj.hostname;
     const fullUrl = urlObj.href;
+    
+    // Check if domain is disabled
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    const isDomainDisabled = disabledDomains.includes(domain);
+    
+    // Remove all menus and recreate based on disabled state
+    await chrome.contextMenus.removeAll();
+    presetMenuItems.clear();
+    
+    if (isDomainDisabled) {
+      // Show only "Enable Webform Presets" option when domain is disabled
+      chrome.contextMenus.create({
+        id: 'enable-for-domain',
+        title: '✅ Enable Webform Presets',
+        contexts: ['page', 'editable']
+      });
+      return;
+    }
+    
+    // Domain is enabled - show normal menu structure
+    chrome.contextMenus.create({
+      id: 'save-preset',
+      title: '💾 Save Webform Preset',
+      contexts: ['page', 'editable']
+    });
+    
+    chrome.contextMenus.create({
+      id: 'manage-presets',
+      title: '⚙️ Manage Webform Presets',
+      contexts: ['page', 'editable']
+    });
 
     // Get presets for this page
     const domainPresets = await getPresetsForScope('domain', domain);
     const urlPresets = await getPresetsForScope('url', fullUrl);
     const allPresets = [...domainPresets, ...urlPresets];
-
-    // Remove old preset menu items
-    await chrome.contextMenus.remove('no-presets').catch(() => {});
-    for (const itemId of presetMenuItems) {
-      await chrome.contextMenus.remove(itemId).catch(() => {});
+    
+    // Get the current tab to check form existence
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    let validPresets = allPresets;
+    
+    if (tabs.length > 0) {
+      // Filter presets to only those whose forms exist on the page
+      const formChecks = await Promise.all(
+        allPresets.map(async preset => {
+          try {
+            const response = await chrome.tabs.sendMessage(tabs[0].id, {
+              action: 'checkFormExists',
+              formSelector: preset.formSelector
+            });
+            return response.exists ? preset : null;
+          } catch (error) {
+            // If content script not loaded, assume preset might be valid
+            console.warn('Could not check form existence:', error);
+            return preset;
+          }
+        })
+      );
+      validPresets = formChecks.filter(p => p !== null);
     }
-    presetMenuItems.clear();
 
-    // Add preset items
-    if (allPresets.length === 0) {
+    // Add preset items at top level (no parent, no nesting)
+    if (validPresets.length > 0) {
+      // Add separator before presets
+      const separatorId = 'presets-separator';
       chrome.contextMenus.create({
-        id: 'no-presets',
-        parentId: 'fill-preset-parent',
-        title: 'No presets available',
-        enabled: false,
+        id: separatorId,
+        type: 'separator',
         contexts: ['page', 'editable']
       });
-    } else {
-      allPresets.forEach((preset, index) => {
+      presetMenuItems.add(separatorId);
+      
+      // Add each preset as a top-level item
+      validPresets.forEach((preset, index) => {
         const menuId = `preset-${preset.id}`;
         chrome.contextMenus.create({
           id: menuId,
-          parentId: 'fill-preset-parent',
-          title: preset.name,
+          title: `📝 ${preset.name}`,
           contexts: ['page', 'editable']
         });
         presetMenuItems.add(menuId);
@@ -182,7 +221,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
  * Handle context menu clicks
  */
 async function handleContextMenuClick(menuItemId, tab) {
-  if (menuItemId === 'save-preset') {
+  if (menuItemId === 'unlock-extension') {
+    await openUnlockPage();
+  } else if (menuItemId === 'enable-for-domain') {
+    // Enable domain from context menu
+    const url = new URL(tab.url);
+    const domain = url.hostname;
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    const index = disabledDomains.indexOf(domain);
+    if (index > -1) {
+      disabledDomains.splice(index, 1);
+      await chrome.storage.local.set({ disabledDomains });
+      await updateContextMenusForPage(tab.url);
+    }
+  } else if (menuItemId === 'save-preset') {
     await ensureUnlocked(() => handleSavePreset(tab));
   } else if (menuItemId.startsWith('preset-')) {
     // Extract preset ID
@@ -246,7 +298,21 @@ async function handleSavePreset(tab) {
  */
 async function handleFillPreset(tab, presetId) {
   try {
-    // Get all presets for current page
+    // First, ensure content script is loaded
+    try {
+      await chrome.tabs.sendMessage(tab.id, { action: 'getCurrentUrl' });
+    } catch (pingError) {
+      // Content script not loaded, inject it
+      console.log('Content script not loaded, injecting...');
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['scripts/utils.js', 'content.js']
+      });
+      // Wait a bit for initialization
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    // Get current URL from content script
     const response = await chrome.tabs.sendMessage(tab.id, {
       action: 'getCurrentUrl'
     });
@@ -275,18 +341,28 @@ async function handleFillPreset(tab, presetId) {
 
     // Decrypt fields
     const fields = await decryptData(preset.encryptedFields);
+    
+    console.log('About to fill preset:', preset.name);
+    console.log('Fields to fill:', fields);
+    console.log('Number of fields:', Object.keys(fields).length);
 
     // Send fill command to content script
-    await chrome.tabs.sendMessage(tab.id, {
+    const fillResponse = await chrome.tabs.sendMessage(tab.id, {
       action: 'fillForm',
+      formSelector: preset.formSelector,
       fields: fields,
-      mode: 'overwrite' // TODO: Add user preference
+      mode: 'overwrite'
     });
-
-    // Update use count
-    preset.useCount = (preset.useCount || 0) + 1;
-    preset.lastUsed = new Date().toISOString();
-    await updatePresetInStorage(preset, urlObj);
+    
+    console.log('Fill response:', fillResponse);
+    
+    // Only update use count if fill was successful
+    if (fillResponse.success) {
+      // Update use count
+      preset.useCount = (preset.useCount || 0) + 1;
+      preset.lastUsed = new Date().toISOString();
+      await updatePresetInStorage(preset, urlObj);
+    }
 
   } catch (error) {
     console.error('Error in handleFillPreset:', error);
@@ -294,12 +370,22 @@ async function handleFillPreset(tab, presetId) {
 }
 
 /**
- * Open management console
+ * Open management console (reuses existing tab if present)
  */
-function openManagementConsole() {
-  chrome.tabs.create({
-    url: chrome.runtime.getURL('options.html')
-  });
+async function openManagementConsole() {
+  const optionsUrl = chrome.runtime.getURL('options.html');
+  
+  // Check if options page is already open
+  const tabs = await chrome.tabs.query({ url: optionsUrl });
+  
+  if (tabs.length > 0) {
+    // Focus existing tab
+    await chrome.tabs.update(tabs[0].id, { active: true });
+    await chrome.windows.update(tabs[0].windowId, { focused: true });
+  } else {
+    // Create new tab
+    await chrome.tabs.create({ url: optionsUrl });
+  }
 }
 
 // ============================================================================
@@ -321,10 +407,20 @@ async function ensureUnlocked(callback) {
 }
 
 /**
- * Open the unlock page
+ * Open unlock page
  */
 async function openUnlockPage() {
   const unlockUrl = chrome.runtime.getURL('unlock.html');
+  
+  // Get current active tab to return to after unlock
+  try {
+    const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (currentTab && !currentTab.url.includes('unlock.html')) {
+      await chrome.storage.session.set({ unlockReferrer: currentTab.url });
+    }
+  } catch (error) {
+    console.error('Error storing referrer:', error);
+  }
   
   // Check if unlock tab is already open
   const tabs = await chrome.tabs.query({ url: unlockUrl });
@@ -453,6 +549,10 @@ async function handleMessage(message, sender, sendResponse) {
         await handleUnlock(message.password, sendResponse);
         break;
         
+      case 'createNewCollection':
+        await handleCreateNewCollection(message.password, sendResponse);
+        break;
+        
       case 'isUnlocked':
         sendResponse({ unlocked: encryptionKey !== null });
         break;
@@ -480,6 +580,14 @@ async function handleMessage(message, sender, sendResponse) {
         
       case 'getPresetsForPage':
         await handleGetPresetsForPage(message.url, sendResponse);
+        break;
+        
+      case 'toggleDomainEnabled':
+        await handleToggleDomainEnabled(message.domain, sendResponse);
+        break;
+        
+      case 'isDomainEnabled':
+        await handleIsDomainEnabled(message.domain, sendResponse);
         break;
         
       case 'triggerSavePreset':
@@ -557,6 +665,19 @@ async function handleUnlock(password, sendResponse) {
     // Set the encryption key
     encryptionKey = key;
     
+    // Recreate context menus now that we're unlocked
+    await createContextMenus();
+    
+    // Update menus for current tab
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length > 0 && tabs[0].url) {
+        await updateContextMenusForPage(tabs[0].url);
+      }
+    } catch (error) {
+      console.warn('Could not update context menus after unlock:', error);
+    }
+    
     // Execute pending callbacks
     for (const callback of unlockCallbacks) {
       await callback();
@@ -566,6 +687,64 @@ async function handleUnlock(password, sendResponse) {
     sendResponse({ success: true });
   } catch (error) {
     console.error('Unlock error:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Handle create new collection
+ */
+async function handleCreateNewCollection(password, sendResponse) {
+  try {
+    // Get the salt
+    const { userSalt } = await chrome.storage.local.get('userSalt');
+    
+    if (!userSalt) {
+      sendResponse({ success: false, error: 'No salt found' });
+      return;
+    }
+    
+    // Derive key from new password
+    const key = await deriveKey(password, userSalt);
+    
+    // Create verification token for this new collection
+    const encoder = new TextEncoder();
+    const testData = encoder.encode('VERIFIED');
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv },
+      key,
+      testData
+    );
+    
+    // Store the new verification token (this creates a new "collection")
+    await chrome.storage.local.set({
+      verificationToken: {
+        iv: Array.from(iv),
+        encrypted: Array.from(new Uint8Array(encrypted))
+      }
+    });
+    
+    // Set the encryption key
+    encryptionKey = key;
+    
+    // Recreate context menus
+    await createContextMenus();
+    
+    // Update menus for current tab
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length > 0 && tabs[0].url) {
+        await updateContextMenusForPage(tabs[0].url);
+      }
+    } catch (error) {
+      console.warn('Could not update context menus after creating collection:', error);
+    }
+    
+    sendResponse({ success: true });
+  } catch (error) {
+    console.error('Create collection error:', error);
     sendResponse({ success: false, error: error.message });
   }
 }
@@ -583,11 +762,16 @@ async function handleSavePresetMessage(presetData, sendResponse) {
       sendResponse({ success: false, error: 'Not unlocked' });
       return;
     }
+    
+    console.log('handleSavePresetMessage received:', presetData);
+    console.log('Fields to save:', presetData.fields);
+    console.log('Number of fields:', Object.keys(presetData.fields).length);
 
     // Generate preset object
     const preset = {
       id: crypto.randomUUID(),
       name: presetData.name,
+      formSelector: presetData.formSelector,
       fields: presetData.fields,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -660,6 +844,58 @@ async function handleGetPresetsForPage(url, sendResponse) {
     });
   } catch (error) {
     console.error('Error getting presets:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Toggle domain enabled/disabled
+ */
+async function handleToggleDomainEnabled(domain, sendResponse) {
+  try {
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    const index = disabledDomains.indexOf(domain);
+    
+    let result;
+    if (index > -1) {
+      // Enable domain
+      result = await enableDomainSync(domain);
+    } else {
+      // Disable domain
+      result = await disableDomainSync(domain);
+    }
+    
+    if (result.success) {
+      // Update context menus for current page
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length > 0 && tabs[0].url) {
+        await updateContextMenusForPage(tabs[0].url);
+      }
+      
+      sendResponse({ 
+        success: true, 
+        enabled: index > -1,
+        synced: result.synced || false
+      });
+    } else {
+      sendResponse({ success: false, error: result.error });
+    }
+  } catch (error) {
+    console.error('Error toggling domain:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
+
+/**
+ * Check if domain is enabled
+ */
+async function handleIsDomainEnabled(domain, sendResponse) {
+  try {
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    const enabled = !disabledDomains.includes(domain);
+    sendResponse({ success: true, enabled });
+  } catch (error) {
+    console.error('Error checking domain status:', error);
     sendResponse({ success: false, error: error.message });
   }
 }

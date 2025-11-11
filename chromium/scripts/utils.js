@@ -200,3 +200,149 @@ async function testSyncServiceConnection() {
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Get or create session ID for this browser
+ */
+async function getSessionId() {
+  try {
+    let result = await chrome.storage.local.get('sessionId');
+    if (!result.sessionId) {
+      // Generate a new session ID
+      result.sessionId = crypto.randomUUID();
+      await chrome.storage.local.set({ sessionId: result.sessionId });
+    }
+    return result.sessionId;
+  } catch (error) {
+    console.error('Error getting session ID:', error);
+    return 'default-session';
+  }
+}
+
+/**
+ * Sync disabled domains with the sync service
+ */
+async function syncDisabledDomains() {
+  try {
+    const syncTest = await testSyncServiceConnection();
+    if (!syncTest.success) {
+      return { success: false, error: 'Sync service not available' };
+    }
+
+    const sessionId = await getSessionId();
+    const baseUrl = await getSyncServiceUrl();
+    
+    // Get disabled domains from sync service
+    const response = await fetch(`${baseUrl}/disabled-domains?sessionId=${encodeURIComponent(sessionId)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status}` };
+    }
+    
+    const data = await response.json();
+    if (data.success) {
+      // Update local storage with synced domains
+      await chrome.storage.local.set({ disabledDomains: data.data.domains || [] });
+      return { success: true, domains: data.data.domains || [] };
+    }
+    
+    return { success: false, error: data.error || 'Unknown error' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Disable domain (sync to service if available)
+ */
+async function disableDomainSync(domain) {
+  try {
+    const syncTest = await testSyncServiceConnection();
+    const sessionId = await getSessionId();
+    
+    if (syncTest.success) {
+      // Sync to service
+      const baseUrl = await getSyncServiceUrl();
+      const response = await fetch(`${baseUrl}/disabled-domains/${encodeURIComponent(domain)}?sessionId=${encodeURIComponent(sessionId)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Also update local storage
+          const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+          if (!disabledDomains.includes(domain)) {
+            disabledDomains.push(domain);
+            await chrome.storage.local.set({ disabledDomains });
+          }
+          return { success: true, synced: true };
+        }
+      }
+    }
+    
+    // Fallback to local storage only
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    if (!disabledDomains.includes(domain)) {
+      disabledDomains.push(domain);
+      await chrome.storage.local.set({ disabledDomains });
+    }
+    return { success: true, synced: false };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enable domain (sync to service if available)
+ */
+async function enableDomainSync(domain) {
+  try {
+    const syncTest = await testSyncServiceConnection();
+    const sessionId = await getSessionId();
+    
+    if (syncTest.success) {
+      // Sync to service
+      const baseUrl = await getSyncServiceUrl();
+      const response = await fetch(`${baseUrl}/disabled-domains/${encodeURIComponent(domain)}?sessionId=${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Also update local storage
+          const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+          const index = disabledDomains.indexOf(domain);
+          if (index > -1) {
+            disabledDomains.splice(index, 1);
+            await chrome.storage.local.set({ disabledDomains });
+          }
+          return { success: true, synced: true };
+        }
+      }
+    }
+    
+    // Fallback to local storage only
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    const index = disabledDomains.indexOf(domain);
+    if (index > -1) {
+      disabledDomains.splice(index, 1);
+      await chrome.storage.local.set({ disabledDomains });
+    }
+    return { success: true, synced: false };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}

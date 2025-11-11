@@ -27,11 +27,52 @@ header {
   color: white;
   padding: 20px;
   text-align: center;
+  position: relative;
 }
 
 header h1 {
   font-size: 18px;
   font-weight: 600;
+}
+
+/* Sync Status */
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.9;
+  justify-content: center;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.sync-status.connected .status-dot {
+  background: #48bb78;
+}
+
+.sync-status.disconnected .status-dot {
+  background: #ed8936;
+}
+
+.sync-status.error .status-dot {
+  background: #f56565;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.sync-status.connected .status-dot {
+  animation: none;
 }
 
 /* State Sections */
@@ -156,6 +197,16 @@ header h1 {
 .action-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.action-btn.secondary {
+  background: #f7fafc;
+  color: #666;
+  font-size: 13px;
+}
+
+.action-btn.secondary:hover {
+  background: #edf2f7;
 }
 
 .action-btn .icon {

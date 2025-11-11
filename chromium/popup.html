@@ -10,6 +10,10 @@
   <div class="container">
     <header>
       <h1>Webform Presets</h1>
+      <div id="sync-status" class="sync-status" title="Checking connection...">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking...</span>
+      </div>
     </header>
     
     <div id="locked-state" class="state-section" style="display: none;">
@@ -35,6 +39,10 @@
           <span class="icon">⚙️</span>
           Manage Presets
         </button>
+        <button id="toggle-domain-btn" class="action-btn secondary">
+          <span class="icon">🚫</span>
+          <span id="toggle-domain-text">Disable for this domain</span>
+        </button>
       </section>
     </div>
     
@@ -43,6 +51,7 @@
     </footer>
   </div>
   
+  <script src="scripts/utils.js"></script>
   <script src="scripts/popup.js"></script>
 </body>
 </html>

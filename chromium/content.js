@@ -130,6 +130,36 @@ function captureFormState(form) {
 }
 
 /**
+ * Get label text for a form field
+ */
+function getFieldLabel(element) {
+  // Try to find associated label
+  if (element.id) {
+    const label = document.querySelector(`label[for="${element.id}"]`);
+    if (label) {
+      return label.textContent.trim();
+    }
+  }
+  
+  // Try to find parent label
+  const parentLabel = element.closest('label');
+  if (parentLabel) {
+    return parentLabel.textContent.trim();
+  }
+  
+  // Try to find nearby label (previous sibling)
+  let sibling = element.previousElementSibling;
+  while (sibling) {
+    if (sibling.tagName === 'LABEL') {
+      return sibling.textContent.trim();
+    }
+    sibling = sibling.previousElementSibling;
+  }
+  
+  return null;
+}
+
+/**
  * Get all form fields (input, select, textarea)
  */
 function getFormFields(form) {
@@ -137,32 +167,45 @@ function getFormFields(form) {
   
   // Get all input elements
   form.querySelectorAll('input').forEach(input => {
-    fields.push({
-      element: input,
-      name: input.name,
-      type: input.type || 'text',
-      value: input.value
-    });
+    // Use name if available, otherwise use id
+    const identifier = input.name || input.id;
+    if (identifier) {
+      fields.push({
+        element: input,
+        name: identifier,
+        label: getFieldLabel(input),
+        type: input.type || 'text',
+        value: input.value
+      });
+    }
   });
   
   // Get all select elements
   form.querySelectorAll('select').forEach(select => {
-    fields.push({
-      element: select,
-      name: select.name,
-      type: 'select',
-      value: select.value
-    });
+    const identifier = select.name || select.id;
+    if (identifier) {
+      fields.push({
+        element: select,
+        name: identifier,
+        label: getFieldLabel(select),
+        type: 'select',
+        value: select.value
+      });
+    }
   });
   
   // Get all textarea elements
   form.querySelectorAll('textarea').forEach(textarea => {
-    fields.push({
-      element: textarea,
-      name: textarea.name,
-      type: 'textarea',
-      value: textarea.value
-    });
+    const identifier = textarea.name || textarea.id;
+    if (identifier) {
+      fields.push({
+        element: textarea,
+        name: identifier,
+        label: getFieldLabel(textarea),
+        type: 'textarea',
+        value: textarea.value
+      });
+    }
   });
   
   return fields;
@@ -209,14 +252,33 @@ function captureFormData(formSelector) {
     }
     
     if (field.name) {
-      data[field.name] = getFieldValue(field);
-      fieldList.push({
-        name: field.name,
-        type: field.type,
-        value: getFieldValue(field)
-      });
+      const value = getFieldValue(field);
+      
+      // Skip empty fields (but keep unchecked checkboxes as they have explicit false state)
+      if (field.type === 'checkbox' || field.type === 'radio') {
+        // Always include checkboxes and radios to preserve their state
+        data[field.name] = value;
+        fieldList.push({
+          name: field.name,
+          type: field.type,
+          value: value
+        });
+      } else if (value && value.trim() !== '') {
+        // Only include text fields that have actual content
+        data[field.name] = value;
+        fieldList.push({
+          name: field.name,
+          type: field.type,
+          value: value
+        });
+      } else {
+        console.log(`Skipping empty field: ${field.name}`);
+      }
     }
   });
+  
+  console.log('Captured data:', data);
+  console.log('Field list:', fieldList);
   
   return {
     selector: formSelector,
@@ -233,28 +295,56 @@ function captureFormData(formSelector) {
  * Fill a form with preset data
  */
 function fillForm(formSelector, presetData, mode = 'overwrite') {
+  console.log('fillForm called with:', { formSelector, presetData, mode });
+  
   let form = null;
   
   // Try to find form by selector if provided
   if (formSelector) {
     form = findFormBySelector(formSelector);
+    console.log('Form found by selector:', form);
+    
+    // If form doesn't exist on this page, don't try to fill
+    if (!form) {
+      console.warn('Form not found on this page, selector:', formSelector);
+      return {
+        success: false,
+        error: 'Form not found on this page',
+        filledCount: 0,
+        skippedCount: 0
+      };
+    }
   }
   
   const initialState = formSelector ? (formSnapshots.get(formSelector) || {}) : {};
   let filledCount = 0;
   let skippedCount = 0;
+  const filledFields = {};
   
   // Iterate through preset data
   for (const [fieldName, fieldValue] of Object.entries(presetData)) {
+    console.log(`Attempting to fill field: ${fieldName} = ${fieldValue}`);
+    
     let field = null;
     
     // Try to find field in specific form first, then in entire document
+    // Search by name attribute first, then by id attribute
     if (form) {
       field = form.querySelector(`[name="${fieldName}"]`);
+      console.log(`Field search in form for [name="${fieldName}"]:`, field);
+      if (!field) {
+        field = form.querySelector(`[id="${fieldName}"]`);
+        console.log(`Field search in form for [id="${fieldName}"]:`, field);
+      }
     }
     
     if (!field) {
       field = document.querySelector(`[name="${fieldName}"]`);
+      console.log(`Field search in document for [name="${fieldName}"]:`, field);
+      if (!field) {
+        field = document.querySelector(`[id="${fieldName}"]`);
+        console.log(`Field search in document for [id="${fieldName}"]:`, field);
+      }
     }
     
     if (!field) {
@@ -281,10 +371,55 @@ function fillForm(formSelector, presetData, mode = 'overwrite') {
     }
     
     // Set field value
+    const beforeValue = field.value;
     if (setFieldValue(field, fieldValue)) {
+      const afterValue = field.value;
+      console.log(`Field ${fieldName}: "${beforeValue}" → "${afterValue}"`);
+      filledFields[fieldName] = afterValue;
       filledCount++;
     }
   }
+  
+  // Verify fields after a short delay (for React/Vue/Angular)
+  setTimeout(() => {
+    console.log('Verifying filled fields...');
+    let verifiedCount = 0;
+    let failedFields = [];
+    
+    for (const [fieldName, expectedValue] of Object.entries(filledFields)) {
+      let field = null;
+      
+      // Search by name first, then by id (same logic as filling)
+      if (form) {
+        field = form.querySelector(`[name="${fieldName}"]`);
+        if (!field) {
+          field = form.querySelector(`[id="${fieldName}"]`);
+        }
+      }
+      if (!field) {
+        field = document.querySelector(`[name="${fieldName}"]`);
+        if (!field) {
+          field = document.querySelector(`[id="${fieldName}"]`);
+        }
+      }
+      
+      if (field) {
+        const actualValue = field.value;
+        if (actualValue === expectedValue) {
+          verifiedCount++;
+        } else {
+          console.warn(`Field ${fieldName} verification failed: expected "${expectedValue}", got "${actualValue}"`);
+          failedFields.push(fieldName);
+        }
+      }
+    }
+    
+    if (verifiedCount === filledCount) {
+      showToast(`✓ Verified ${verifiedCount} field(s)`, 'success');
+    } else {
+      showToast(`⚠ Filled ${filledCount} but only verified ${verifiedCount} field(s)`, 'warning');
+    }
+  }, 200);
   
   return {
     success: true,
@@ -299,6 +434,13 @@ function fillForm(formSelector, presetData, mode = 'overwrite') {
  */
 function setFieldValue(element, value) {
   try {
+    console.log(`setFieldValue called for ${element.name || element.id}:`, {
+      type: element.type,
+      tagName: element.tagName,
+      currentValue: element.value,
+      newValue: value
+    });
+    
     const fieldType = element.type;
     
     if (fieldType === 'checkbox') {
@@ -314,6 +456,11 @@ function setFieldValue(element, value) {
     // Trigger events for framework compatibility
     element.dispatchEvent(new Event('input', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    // Additional events for some frameworks
+    element.dispatchEvent(new Event('blur', { bubbles: true }));
+    
+    console.log(`Field value after setting:`, element.value);
     
     return true;
   } catch (error) {
@@ -395,16 +542,21 @@ async function handleMessage(message, sendResponse) {
           message.fields,
           message.mode || 'overwrite'
         );
-        if (fillResult.success) {
-          showToast(fillResult.message, 'success');
-        } else {
-          showToast(fillResult.error || 'Failed to fill form', 'error');
-        }
+        // Don't show toast here - let the caller decide
+        // (verification toast is shown in fillForm itself for successful fills)
         sendResponse(fillResult);
         break;
         
       case 'getCurrentUrl':
         sendResponse({ url: window.location.href });
+        break;
+        
+      case 'checkFormExists':
+        // Check if a form with the given selector exists
+        const formExists = message.formSelector ? 
+          (findFormBySelector(message.formSelector) !== null) : 
+          false;
+        sendResponse({ exists: formExists });
         break;
         
       case 'getForms':
@@ -503,7 +655,11 @@ function showFormSelectionModal(forms) {
 function showSaveModal(formData) {
   const pageInfo = getCurrentPageInfo();
   
-  const fieldCheckboxes = formData.fieldList.map(field => `
+  const fieldCheckboxes = formData.fieldList.map(field => {
+    const displayName = field.label || field.name;
+    const secondaryInfo = field.label ? field.name : '';
+    
+    return `
     <label style="
       display: flex;
       align-items: center;
@@ -519,13 +675,14 @@ function showSaveModal(formData) {
         cursor: pointer;
       ">
       <div style="flex: 1;">
-        <div style="font-weight: 500; font-size: 14px;">${escapeHtml(field.name)}</div>
+        <div style="font-weight: 500; font-size: 14px;">${escapeHtml(displayName)}</div>
         <div style="font-size: 12px; color: #6b7280;">
-          ${escapeHtml(field.type)} • ${escapeHtml(field.value.substring(0, 50))}${field.value.length > 50 ? '...' : ''}
+          ${secondaryInfo ? escapeHtml(secondaryInfo) + ' • ' : ''}${escapeHtml(field.type)} • ${escapeHtml(field.value.substring(0, 50))}${field.value.length > 50 ? '...' : ''}
         </div>
       </div>
     </label>
-  `).join('');
+  `;
+  }).join('');
 
   const modalContent = `
     <form id="wfp-save-form">
@@ -713,6 +870,10 @@ function showSaveModal(formData) {
         filteredData[fieldName] = formData.data[fieldName];
       }
     });
+    
+    console.log('Selected fields:', selectedFields);
+    console.log('Original form data:', formData.data);
+    console.log('Filtered data to save:', filteredData);
 
     // Send to background for encryption and storage
     const saveBtn = modal.querySelector('#wfp-save-btn');
@@ -726,9 +887,12 @@ function showSaveModal(formData) {
           name: name,
           scopeType: scope,
           scopeValue: scope === 'domain' ? pageInfo.domain : pageInfo.url,
+          formSelector: formData.selector,
           fields: filteredData
         }
       });
+      
+      console.log('Save response:', response);
 
       if (response.error) {
         throw new Error(response.error);
