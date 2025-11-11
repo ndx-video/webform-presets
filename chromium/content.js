@@ -251,10 +251,13 @@ function captureFormData(formSelector) {
   console.log('Fields found:', fields.length);
   const data = {};
   const fieldList = [];
+  let passwordFieldsFound = 0;
   
   fields.forEach(field => {
-    // Skip password fields
+    // Skip password fields but count them
     if (field.type === 'password') {
+      passwordFieldsFound++;
+      console.warn(`Password field excluded: ${field.name || field.id || 'unnamed'}`);
       return;
     }
     
@@ -286,11 +289,15 @@ function captureFormData(formSelector) {
   
   console.log('Captured data:', data);
   console.log('Field list:', fieldList);
+  if (passwordFieldsFound > 0) {
+    console.warn(`⚠️ ${passwordFieldsFound} password field(s) excluded from preset for security`);
+  }
   
   return {
     selector: formSelector,
     data,
-    fieldList
+    fieldList,
+    passwordFieldsExcluded: passwordFieldsFound
   };
 }
 
@@ -920,6 +927,20 @@ function showSaveModal(formData) {
             color: #667eea;
           ">Select None</button>
         </div>
+        ${formData.passwordFieldsExcluded > 0 ? `
+        <div style="
+          margin-top: 12px;
+          padding: 10px 12px;
+          background: #fef3c7;
+          border: 1px solid #fbbf24;
+          border-radius: 6px;
+          font-size: 13px;
+          color: #92400e;
+        ">
+          <span style="font-weight: 600;">🔒 Security Note:</span>
+          ${formData.passwordFieldsExcluded} password field(s) excluded for security
+        </div>
+        ` : ''}
       </div>
 
       <div style="display: flex; gap: 10px; justify-content: flex-end;">
