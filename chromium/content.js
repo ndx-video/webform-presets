@@ -266,10 +266,22 @@ function captureFormData(formSelector) {
     if (field.name) {
       const value = getFieldValue(field);
       const isEmpty = !value || value.trim() === '';
-      const isHidden = field.type === 'hidden' || 
-                       field.offsetParent === null || 
-                       window.getComputedStyle(field).display === 'none' ||
-                       window.getComputedStyle(field).visibility === 'hidden';
+      
+      // Safely check if field is hidden
+      let isHidden = false;
+      try {
+        if (field.type === 'hidden') {
+          isHidden = true;
+        } else if (field instanceof Element) {
+          // Check if element is not visible
+          isHidden = field.offsetParent === null || 
+                     window.getComputedStyle(field).display === 'none' ||
+                     window.getComputedStyle(field).visibility === 'hidden';
+        }
+      } catch (error) {
+        console.warn(`Could not determine visibility for field ${field.name}:`, error);
+        isHidden = false;
+      }
       
       const fieldInfo = {
         name: field.name,
