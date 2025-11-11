@@ -685,11 +685,14 @@ async function handleUnlock(password, sendResponse) {
     
     console.log('[UNLOCK] Extension unlocked successfully');
     
-    // Recreate context menus now that we're unlocked
-    await createContextMenus();
+    // Send success response immediately before doing other work
+    sendResponse({ success: true });
     
-    // Update menus for current tab
+    // Recreate context menus now that we're unlocked (don't block response)
     try {
+      await createContextMenus();
+      
+      // Update menus for current tab
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs.length > 0 && tabs[0].url) {
         await updateContextMenusForPage(tabs[0].url);
@@ -699,12 +702,14 @@ async function handleUnlock(password, sendResponse) {
     }
     
     // Execute pending callbacks
-    for (const callback of unlockCallbacks) {
-      await callback();
+    try {
+      for (const callback of unlockCallbacks) {
+        await callback();
+      }
+      unlockCallbacks = [];
+    } catch (error) {
+      console.error('Error executing unlock callbacks:', error);
     }
-    unlockCallbacks = [];
-    
-    sendResponse({ success: true });
   } catch (error) {
     console.error('[UNLOCK] ERROR: Unlock failed:', error);
     console.error('[UNLOCK] Error stack:', error.stack);
@@ -762,13 +767,17 @@ async function handleCreateNewCollection(password, sendResponse) {
     // Set the encryption key
     encryptionKey = key;
     
-    console.log('[CREATE_COLLECTION] Setting up context menus');
+    console.log('[CREATE_COLLECTION] New collection created successfully!');
     
-    // Recreate context menus
-    await createContextMenus();
+    // Send success response immediately
+    sendResponse({ success: true });
     
-    // Update menus for current tab
+    // Set up context menus (don't block response)
     try {
+      console.log('[CREATE_COLLECTION] Setting up context menus');
+      await createContextMenus();
+      
+      // Update menus for current tab
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs.length > 0 && tabs[0].url) {
         await updateContextMenusForPage(tabs[0].url);
@@ -776,9 +785,6 @@ async function handleCreateNewCollection(password, sendResponse) {
     } catch (error) {
       console.warn('[CREATE_COLLECTION] Could not update context menus:', error);
     }
-    
-    console.log('[CREATE_COLLECTION] New collection created successfully!');
-    sendResponse({ success: true });
   } catch (error) {
     console.error('[CREATE_COLLECTION] ERROR: Failed to create collection:', error);
     console.error('[CREATE_COLLECTION] Error stack:', error.stack);
