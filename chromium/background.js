@@ -457,6 +457,13 @@ async function handleMessage(message, sender, sendResponse) {
         sendResponse({ unlocked: encryptionKey !== null });
         break;
         
+      case 'lock':
+        encryptionKey = null;
+        presetMenuItems.clear();
+        await createContextMenus(); // Reset context menus
+        sendResponse({ success: true });
+        break;
+        
       case 'encrypt':
         const encrypted = await encryptData(message.data);
         sendResponse({ encrypted });
@@ -498,7 +505,7 @@ async function handleMessage(message, sender, sendResponse) {
  */
 async function handleUnlock(password, sendResponse) {
   try {
-    const { userSalt } = await chrome.storage.local.get('userSalt');
+    const { userSalt, verificationToken } = await chrome.storage.local.get(['userSalt', 'verificationToken']);
     
     if (!userSalt) {
       sendResponse({ success: false, error: 'No salt found' });
@@ -506,9 +513,49 @@ async function handleUnlock(password, sendResponse) {
     }
     
     // Derive key
-    encryptionKey = await deriveKey(password, userSalt);
+    const key = await deriveKey(password, userSalt);
     
-    // TODO: Verify key is correct by trying to decrypt a test value
+    // Verify key is correct if verification token exists
+    if (verificationToken) {
+      try {
+        const testData = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: new Uint8Array(verificationToken.iv) },
+          key,
+          new Uint8Array(verificationToken.encrypted)
+        );
+        const decoder = new TextDecoder();
+        const testString = decoder.decode(testData);
+        
+        if (testString !== 'VERIFIED') {
+          sendResponse({ success: false, error: 'Incorrect password' });
+          return;
+        }
+      } catch (error) {
+        sendResponse({ success: false, error: 'Incorrect password' });
+        return;
+      }
+    } else {
+      // First unlock - create verification token
+      const encoder = new TextEncoder();
+      const testData = encoder.encode('VERIFIED');
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        testData
+      );
+      
+      await chrome.storage.local.set({
+        verificationToken: {
+          iv: Array.from(iv),
+          encrypted: Array.from(new Uint8Array(encrypted))
+        }
+      });
+    }
+    
+    // Set the encryption key
+    encryptionKey = key;
     
     // Execute pending callbacks
     for (const callback of unlockCallbacks) {
@@ -554,6 +601,16 @@ async function handleSavePresetMessage(presetData, sendResponse) {
 
     // Save to storage based on scope
     await savePreset(presetData.scopeType, presetData.scopeValue, preset);
+
+    // Update context menus for current tab
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs.length > 0 && tabs[0].url) {
+        await updateContextMenusForPage(tabs[0].url);
+      }
+    } catch (menuError) {
+      console.warn('Could not update context menus:', menuError);
+    }
 
     sendResponse({ 
       success: true, 

@@ -73,23 +73,42 @@ function showUnlockedView() {
  */
 async function handleUnlock() {
   const unlockUrl = chrome.runtime.getURL('unlock.html');
+  
+  // Create a promise to wait for unlock
+  const waitForUnlock = new Promise((resolve) => {
+    const interval = setInterval(async () => {
+      const response = await chrome.runtime.sendMessage({ action: 'isUnlocked' });
+      if (response.unlocked) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 500);
+  });
+  
   await chrome.tabs.create({ url: unlockUrl });
   
-  // Listen for unlock completion
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.action === 'unlocked') {
-      initialize();
-    }
-  });
+  // Wait for unlock and then reload
+  await waitForUnlock;
+  await initialize();
 }
 
 /**
  * Handle lock button
  */
-function handleLock() {
-  // TODO: Implement lock functionality (clear key from background)
-  showLockedView();
-  isUnlocked = false;
+async function handleLock() {
+  try {
+    // Send lock message to background
+    const response = await chrome.runtime.sendMessage({ action: 'lock' });
+    
+    if (response.success) {
+      showLockedView();
+      isUnlocked = false;
+      allPresets = [];
+    }
+  } catch (error) {
+    console.error('Error locking:', error);
+    showNotification('Error', 'Failed to lock', 'error');
+  }
 }
 
 /**
