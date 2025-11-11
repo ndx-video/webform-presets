@@ -5,12 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Manage Webform Presets</title>
   <link rel="stylesheet" href="styles/options.css">
+  <link rel="stylesheet" href="styles/modal.css">
 </head>
 <body>
   <div class="options-container">
     <header class="header">
       <h1>🔐 Webform Presets Manager</h1>
       <div class="header-actions">
+        <div id="sync-status" class="sync-status" title="Checking connection...">
+          <span class="status-dot"></span>
+          <span class="status-text">Checking...</span>
+        </div>
         <button id="lock-btn" class="btn-secondary">🔒 Lock</button>
       </div>
     </header>
@@ -50,6 +55,10 @@
           <h3>Statistics</h3>
           <div class="stats">
             <div class="stat-item">
+              <span class="stat-label">Collections:</span>
+              <span id="total-collections" class="stat-value">0</span>
+            </div>
+            <div class="stat-item">
               <span class="stat-label">Total Presets:</span>
               <span id="total-presets" class="stat-value">0</span>
             </div>
@@ -58,6 +67,14 @@
               <span id="total-domains" class="stat-value">0</span>
             </div>
           </div>
+        </div>
+        
+        <div class="nav-section danger-zone">
+          <h3>⚠️ Danger Zone</h3>
+          <button id="delete-all-btn" class="nav-btn btn-danger">
+            <span class="icon">🗑️</span> Delete All Collections
+          </button>
+          <p class="danger-help">This will remove all presets from all collections. Cannot be undone.</p>
         </div>
       </nav>
       
@@ -82,8 +99,38 @@
   </div>
   
   <!-- Hidden file input for import -->
-  <input type="file" id="file-input" accept=".json" style="display: none;">
+  <input type="file" id="file-input" accept=".zip,.json" style="display: none;">
   
+  <!-- Export dialog -->
+  <div id="export-dialog" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h2>Export Preset Collections</h2>
+      <p>Choose what to export:</p>
+      <div class="export-options">
+        <label class="radio-option">
+          <input type="radio" name="export-type" value="current" checked>
+          <div>
+            <span>Current Collection Only</span>
+            <small>Export presets from the currently unlocked collection</small>
+          </div>
+        </label>
+        <label class="radio-option">
+          <input type="radio" name="export-type" value="all">
+          <div>
+            <span>All Collections</span>
+            <small>Export all collections (encrypted data remains secure)</small>
+          </div>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="export-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="export-confirm-btn" class="btn-primary">Export</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="scripts/utils.js"></script>
   <script src="scripts/options.js"></script>
 </body>
 </html>

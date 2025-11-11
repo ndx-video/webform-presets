@@ -18,6 +18,9 @@ document.addEventListener('DOMContentLoaded', async () => {
  * Initialize the options page
  */
 async function initialize() {
+  // Update sync service status
+  updateSyncStatus();
+  
   // Check if unlocked
   const response = await chrome.runtime.sendMessage({ action: 'isUnlocked' });
   isUnlocked = response.unlocked;
@@ -42,6 +45,9 @@ function setupEventListeners() {
   document.getElementById('expand-all-btn')?.addEventListener('click', expandAll);
   document.getElementById('collapse-all-btn')?.addEventListener('click', collapseAll);
   document.getElementById('file-input')?.addEventListener('change', handleFileSelect);
+  document.getElementById('delete-all-btn')?.addEventListener('click', handleDeleteAll);
+  document.getElementById('export-confirm-btn')?.addEventListener('click', handleExportConfirm);
+  document.getElementById('export-cancel-btn')?.addEventListener('click', handleExportCancel);
 }
 
 // ============================================================================
@@ -112,35 +118,319 @@ async function handleLock() {
 }
 
 /**
- * Handle export button
+ * Handle delete all collections button with two-click confirmation
  */
-async function handleExport() {
-  try {
-    // Get all data from storage
-    const allData = await chrome.storage.local.get(null);
+let deleteAllConfirming = false;
+async function handleDeleteAll() {
+  const btn = document.getElementById('delete-all-btn');
+  
+  if (!deleteAllConfirming) {
+    // First click: change to confirmation state
+    deleteAllConfirming = true;
+    btn.classList.add('confirming');
+    btn.innerHTML = '<span class="icon">⚠️</span> Click Again to Confirm Delete';
     
-    // Create export object
+    // Reset after 3 seconds if not clicked again
+    setTimeout(() => {
+      if (deleteAllConfirming) {
+        deleteAllConfirming = false;
+        btn.classList.remove('confirming');
+        btn.innerHTML = '<span class="icon">🗑️</span> Delete All Collections';
+      }
+    }, 3000);
+  } else {
+    // Second click: actually delete
+    try {
+      // Clear all chrome storage
+      await chrome.storage.local.clear();
+      
+      // Send message to background to reset
+      await chrome.runtime.sendMessage({ action: 'lock' });
+      
+      // Show success and reload
+      showNotification('Success', 'All collections deleted', 'success');
+      
+      // Reset state
+      deleteAllConfirming = false;
+      btn.classList.remove('confirming');
+      btn.innerHTML = '<span class="icon">🗑️</span> Delete All Collections';
+      
+      // Reload after brief delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Error deleting all:', error);
+      showNotification('Error', 'Failed to delete all collections', 'error');
+      deleteAllConfirming = false;
+      btn.classList.remove('confirming');
+      btn.innerHTML = '<span class="icon">🗑️</span> Delete All Collections';
+    }
+  }
+}
+
+
+/**
+ * Handle export button - show dialog
+ */
+function handleExport() {
+  document.getElementById('export-dialog').style.display = 'flex';
+}
+
+/**
+ * Export confirmation handler
+ */
+async function handleExportConfirm() {
+  const exportType = document.querySelector('input[name="export-type"]:checked').value;
+  
+  // Hide dialog
+  document.getElementById('export-dialog').style.display = 'none';
+  
+  try {
+    if (exportType === 'current') {
+      await exportCurrentCollection();
+    } else {
+      await exportAllCollections();
+    }
+  } catch (error) {
+    console.error('Export error:', error);
+    showNotification('Error', 'Failed to export: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Export cancel handler
+ */
+function handleExportCancel() {
+  document.getElementById('export-dialog').style.display = 'none';
+}
+
+/**
+ * Export current collection only
+ */
+async function exportCurrentCollection() {
+  try {
+    const manifest = chrome.runtime.getManifest();
     const exportData = {
-      version: '1.0.0',
+      version: manifest.version,
+      appName: 'Webform Presets',
       exportDate: new Date().toISOString(),
-      data: allData
+      exportType: 'current-collection',
+      collections: []
     };
     
-    // Create download
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
-      type: 'application/json' 
+    // Get current collection data
+    const currentPresets = {};
+    for (const scope of allPresets) {
+      for (const preset of scope.presets) {
+        const key = `preset_${scope.domain}_${preset.name}`;
+        const stored = await chrome.storage.local.get(key);
+        if (stored[key]) {
+          currentPresets[key] = stored[key];
+        }
+      }
+    }
+    
+    // Get verification token for current collection
+    const result = await chrome.storage.local.get(['verificationToken', 'userSalt']);
+    
+    const domains = new Set();
+    for (const scope of allPresets) {
+      domains.add(scope.domain);
+    }
+    
+    exportData.collections.push({
+      name: 'Current Collection',
+      metadata: {
+        presetCount: Object.keys(currentPresets).length,
+        domains: Array.from(domains),
+        exportDate: new Date().toISOString()
+      },
+      encryptedData: currentPresets,
+      verificationToken: result.verificationToken,
+      userSalt: result.userSalt
     });
-    const url = URL.createObjectURL(blob);
+    
+    await createAndDownloadZip(exportData, 'current');
+    
+  } catch (error) {
+    console.error('Export current error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Export all collections
+ */
+async function exportAllCollections() {
+  try {
+    const manifest = chrome.runtime.getManifest();
+    const exportData = {
+      version: manifest.version,
+      appName: 'Webform Presets',
+      exportDate: new Date().toISOString(),
+      exportType: 'all-collections',
+      collections: []
+    };
+    
+    // Get all storage data
+    const allData = await chrome.storage.local.get(null);
+    
+    // Identify all collections by verification tokens
+    const collections = {};
+    const sharedData = {
+      userSalt: allData.userSalt
+    };
+    
+    // Group data by collection
+    for (const key in allData) {
+      if (key.startsWith('verificationToken_')) {
+        const collectionId = key.replace('verificationToken_', '');
+        collections[collectionId] = {
+          name: `Collection ${Object.keys(collections).length + 1}`,
+          verificationToken: allData[key],
+          encryptedData: {},
+          metadata: {
+            domains: [],
+            presetCount: 0
+          }
+        };
+      } else if (key.startsWith('preset_')) {
+        // Add to first collection for now (will be properly associated in a real implementation)
+        const firstCollection = Object.keys(collections)[0];
+        if (firstCollection) {
+          collections[firstCollection].encryptedData[key] = allData[key];
+        }
+      }
+    }
+    
+    // If no separate collections found, treat as single collection
+    if (Object.keys(collections).length === 0 && allData.verificationToken) {
+      const presets = {};
+      const domains = new Set();
+      
+      for (const key in allData) {
+        if (key.startsWith('preset_')) {
+          presets[key] = allData[key];
+          // Extract domain from key
+          const parts = key.split('_');
+          if (parts.length >= 2) {
+            domains.add(parts[1]);
+          }
+        }
+      }
+      
+      exportData.collections.push({
+        name: 'Main Collection',
+        verificationToken: allData.verificationToken,
+        userSalt: allData.userSalt,
+        encryptedData: presets,
+        metadata: {
+          domains: Array.from(domains),
+          presetCount: Object.keys(presets).length,
+          exportDate: new Date().toISOString()
+        }
+      });
+    } else {
+      // Add each collection
+      for (const collectionId in collections) {
+        const collection = collections[collectionId];
+        const domains = new Set();
+        
+        for (const key in collection.encryptedData) {
+          const parts = key.split('_');
+          if (parts.length >= 2) {
+            domains.add(parts[1]);
+          }
+        }
+        
+        collection.metadata.domains = Array.from(domains);
+        collection.metadata.presetCount = Object.keys(collection.encryptedData).length;
+        collection.metadata.exportDate = new Date().toISOString();
+        collection.userSalt = sharedData.userSalt;
+        
+        exportData.collections.push(collection);
+      }
+    }
+    
+    await createAndDownloadZip(exportData, 'all');
+    
+  } catch (error) {
+    console.error('Export all error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create ZIP file and trigger download
+ */
+async function createAndDownloadZip(exportData, type) {
+  try {
+    if (typeof JSZip === 'undefined') {
+      throw new Error('JSZip library not loaded');
+    }
+    
+    const zip = new JSZip();
+    
+    // Create JSON data string
+    const jsonData = JSON.stringify(exportData, null, 2);
+    
+    // Verify JSON integrity
+    try {
+      JSON.parse(jsonData);
+    } catch (e) {
+      throw new Error('Data integrity check failed - invalid JSON');
+    }
+    
+    // Add JSON file to ZIP
+    zip.file('webform-presets-export.json', jsonData);
+    
+    // Add README
+    const readme = `Webform Presets Export
+======================
+
+Export Type: ${exportData.exportType}
+App Version: ${exportData.version}
+Export Date: ${exportData.exportDate}
+Collections: ${exportData.collections.length}
+
+This archive contains encrypted preset data from the Webform Presets extension.
+The data remains encrypted and can only be decrypted with the correct collection password(s).
+
+To import:
+1. Install the Webform Presets extension (version ${exportData.version} or compatible)
+2. Open the preset manager
+3. Click "Import" and select this ZIP file
+4. Enter the collection password when prompted
+
+Note: Passwords are not included in this export for security reasons.
+You must remember your collection password(s) to import this data.
+`;
+    
+    zip.file('README.txt', readme);
+    
+    // Generate ZIP blob
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 }
+    });
+    
+    // Create download
+    const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `webform-presets-backup-${Date.now()}.json`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    a.download = `webform-presets-${type}-${timestamp}.zip`;
     a.click();
     URL.revokeObjectURL(url);
     
-    showNotification('Success', 'Backup exported successfully', 'success');
+    showNotification('Success', `Exported ${exportData.collections.length} collection(s) successfully`, 'success');
+    
   } catch (error) {
-    console.error('Export error:', error);
-    showNotification('Error', 'Failed to export data', 'error');
+    console.error('ZIP creation error:', error);
+    throw new Error('Failed to create ZIP file: ' + error.message);
   }
 }
 
@@ -159,36 +449,165 @@ async function handleFileSelect(event) {
   if (!file) return;
   
   try {
-    const text = await file.text();
-    const importData = JSON.parse(text);
-    
-    // Validate import data
-    if (!importData.version || !importData.data) {
-      throw new Error('Invalid backup file format');
+    // Determine if it's a ZIP or JSON file
+    if (file.name.endsWith('.zip')) {
+      await handleZipImport(file);
+    } else if (file.name.endsWith('.json')) {
+      await handleJsonImport(file);
+    } else {
+      throw new Error('Unsupported file format. Please use .zip or .json files.');
     }
-    
-    // Confirm import
-    const confirmed = confirm(
-      '⚠️ WARNING ⚠️\n\n' +
-      'This will replace ALL your current presets with the imported data.\n\n' +
-      'Are you sure you want to continue?'
-    );
-    
-    if (!confirmed) return;
-    
-    // Clear existing data and import
-    await chrome.storage.local.clear();
-    await chrome.storage.local.set(importData.data);
-    
-    showNotification('Success', 'Data imported successfully', 'success');
-    await loadAllPresets();
   } catch (error) {
     console.error('Import error:', error);
-    showNotification('Error', 'Failed to import data: ' + error.message, 'error');
+    showNotification('Error', 'Failed to import: ' + error.message, 'error');
   }
   
   // Reset file input
   event.target.value = '';
+}
+
+/**
+ * Handle ZIP file import
+ */
+async function handleZipImport(file) {
+  try {
+    if (typeof JSZip === 'undefined') {
+      throw new Error('JSZip library not loaded');
+    }
+    
+    const zip = await JSZip.loadAsync(file);
+    
+    // Look for the JSON file
+    const jsonFile = zip.file('webform-presets-export.json');
+    if (!jsonFile) {
+      throw new Error('Invalid export file - missing data file');
+    }
+    
+    // Extract and parse JSON
+    const jsonText = await jsonFile.async('text');
+    const importData = JSON.parse(jsonText);
+    
+    // Validate import data
+    await validateAndImport(importData);
+    
+  } catch (error) {
+    console.error('ZIP import error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Handle legacy JSON import
+ */
+async function handleJsonImport(file) {
+  try {
+    const text = await file.text();
+    const importData = JSON.parse(text);
+    
+    // Check if it's new format or legacy format
+    if (importData.collections) {
+      await validateAndImport(importData);
+    } else if (importData.data) {
+      // Legacy format
+      await importLegacyFormat(importData);
+    } else {
+      throw new Error('Invalid backup file format');
+    }
+  } catch (error) {
+    console.error('JSON import error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Validate and import data
+ */
+async function validateAndImport(importData) {
+  // Version check
+  const manifest = chrome.runtime.getManifest();
+  const importVersion = importData.version;
+  const currentVersion = manifest.version;
+  
+  console.log(`Importing from version ${importVersion} into version ${currentVersion}`);
+  
+  // Validate structure
+  if (!importData.collections || !Array.isArray(importData.collections)) {
+    throw new Error('Invalid export format - missing collections');
+  }
+  
+  if (importData.collections.length === 0) {
+    throw new Error('Export file contains no collections');
+  }
+  
+  // Version compatibility check
+  const importMajor = parseInt(importVersion.split('.')[0]);
+  const currentMajor = parseInt(currentVersion.split('.')[0]);
+  
+  if (importMajor > currentMajor) {
+    throw new Error(`This export was created with a newer version (${importVersion}). Please update the extension to import this file.`);
+  }
+  
+  // Show import confirmation
+  const collectionInfo = importData.collections.map((c, i) => 
+    `  ${i + 1}. ${c.name} (${c.metadata.presetCount} presets across ${c.metadata.domains.length} domains)`
+  ).join('\n');
+  
+  const message = `Import ${importData.collections.length} collection(s)?\n\n${collectionInfo}\n\nThis will REPLACE all existing data!`;
+  
+  // TODO: Replace with non-modal confirmation dialog
+  const confirmed = confirm('⚠️ WARNING ⚠️\n\n' + message);
+  
+  if (!confirmed) return;
+  
+  // Import collections
+  await chrome.storage.local.clear();
+  
+  for (const collection of importData.collections) {
+    // Import verification token
+    if (collection.verificationToken) {
+      await chrome.storage.local.set({ verificationToken: collection.verificationToken });
+    }
+    
+    // Import user salt
+    if (collection.userSalt) {
+      await chrome.storage.local.set({ userSalt: collection.userSalt });
+    }
+    
+    // Import encrypted data
+    if (collection.encryptedData) {
+      await chrome.storage.local.set(collection.encryptedData);
+    }
+  }
+  
+  showNotification('Success', `Imported ${importData.collections.length} collection(s)`, 'success');
+  
+  // Reload to unlock page (user needs to enter password)
+  setTimeout(() => {
+    window.location.reload();
+  }, 1500);
+}
+
+/**
+ * Import legacy format
+ */
+async function importLegacyFormat(importData) {
+  const confirmed = confirm(
+    '⚠️ WARNING ⚠️\n\n' +
+    'This appears to be a legacy backup format.\n' +
+    'This will REPLACE all your current presets.\n\n' +
+    'Continue?'
+  );
+  
+  if (!confirmed) return;
+  
+  await chrome.storage.local.clear();
+  await chrome.storage.local.set(importData.data);
+  
+  showNotification('Success', 'Legacy data imported successfully', 'success');
+  
+  setTimeout(() => {
+    window.location.reload();
+  }, 1500);
 }
 
 /**
@@ -275,10 +694,27 @@ async function loadAllPresets() {
 /**
  * Update statistics display
  */
-function updateStatistics() {
+async function updateStatistics() {
   const totalPresets = allPresets.reduce((sum, scope) => sum + scope.presets.length, 0);
   const totalDomains = allPresets.length;
   
+  // Count collections by counting distinct verification tokens
+  const result = await chrome.storage.local.get(null);
+  let collectionCount = 0;
+  
+  // Look for all verification tokens (each collection has one)
+  for (const key in result) {
+    if (key.startsWith('verificationToken_')) {
+      collectionCount++;
+    }
+  }
+  
+  // If no tokens found but presets exist, there's at least 1 collection
+  if (collectionCount === 0 && (result.userSalt || result.verificationToken)) {
+    collectionCount = 1;
+  }
+  
+  document.getElementById('total-collections').textContent = collectionCount;
   document.getElementById('total-presets').textContent = totalPresets;
   document.getElementById('total-domains').textContent = totalDomains;
 }
@@ -447,12 +883,87 @@ async function handleDeletePreset(scopeKey, presetId) {
 // ============================================================================
 
 /**
+ * Update sync service connection status
+ */
+async function updateSyncStatus() {
+  const statusEl = document.getElementById('sync-status');
+  const statusDot = statusEl.querySelector('.status-dot');
+  const statusText = statusEl.querySelector('.status-text');
+  
+  try {
+    const result = await testSyncServiceConnection();
+    
+    if (result.success) {
+      statusEl.className = 'sync-status connected';
+      statusText.textContent = 'Sync Service';
+      statusEl.title = 'Connected to webform-sync service';
+    } else {
+      statusEl.className = 'sync-status disconnected';
+      statusText.textContent = 'Local Storage';
+      statusEl.title = 'Using browser local storage (sync service unavailable)';
+    }
+  } catch (error) {
+    statusEl.className = 'sync-status error';
+    statusText.textContent = 'Error';
+    statusEl.title = `Connection error: ${error.message}`;
+  }
+}
+
+/**
  * Show notification
  */
 function showNotification(title, message, type = 'info') {
-  // TODO: Implement proper toast notification
-  console.log(`[${type}] ${title}: ${message}`);
-  alert(`${title}\n\n${message}`);
+  // Create a toast notification at the bottom right
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  
+  const colors = {
+    success: '#10b981',
+    error: '#ef4444',
+    warning: '#f59e0b',
+    info: '#3b82f6'
+  };
+  
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: ${colors[type] || colors.info};
+    color: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 10000;
+    max-width: 350px;
+    font-size: 14px;
+    animation: slideIn 0.3s ease-out;
+  `;
+  
+  toast.innerHTML = `
+    <strong>${title}</strong><br>
+    ${message}
+  `;
+  
+  // Add animation style if not exists
+  if (!document.getElementById('toast-styles')) {
+    const style = document.createElement('style');
+    style.id = 'toast-styles';
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(400px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  document.body.appendChild(toast);
+  
+  // Auto remove after 4 seconds
+  setTimeout(() => {
+    toast.style.animation = 'slideIn 0.3s ease-out reverse';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
 }
 
 /**

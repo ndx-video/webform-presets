@@ -34,6 +34,12 @@ body {
   font-weight: 600;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
 .header-actions button {
   padding: 8px 16px;
   background: rgba(255,255,255,0.2);
@@ -47,6 +53,59 @@ body {
 
 .header-actions button:hover {
   background: rgba(255,255,255,0.3);
+}
+
+/* Sync Status */
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #999;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.sync-status.connected {
+  background: rgba(72, 187, 120, 0.2);
+  border-color: rgba(72, 187, 120, 0.3);
+}
+
+.sync-status.connected .status-dot {
+  background: #48bb78;
+  animation: none;
+}
+
+.sync-status.disconnected {
+  background: rgba(237, 137, 54, 0.2);
+  border-color: rgba(237, 137, 54, 0.3);
+}
+
+.sync-status.disconnected .status-dot {
+  background: #ed8936;
+}
+
+.sync-status.error {
+  background: rgba(245, 101, 101, 0.2);
+  border-color: rgba(245, 101, 101, 0.3);
+}
+
+.sync-status.error .status-dot {
+  background: #f56565;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* Locked View */
@@ -169,6 +228,46 @@ body {
 .stat-value {
   font-weight: 600;
   color: #667eea;
+}
+
+/* Danger Zone */
+.danger-zone {
+  border-top: 2px solid #fee;
+  padding-top: 15px;
+  margin-top: 20px;
+}
+
+.danger-zone h3 {
+  color: #e53e3e;
+}
+
+.btn-danger {
+  background: #fff5f5 !important;
+  color: #e53e3e !important;
+  border: 1px solid #fc8181;
+}
+
+.btn-danger:hover {
+  background: #fed7d7 !important;
+}
+
+.btn-danger.confirming {
+  background: #e53e3e !important;
+  color: white !important;
+  animation: shake 0.3s;
+}
+
+.danger-help {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #999;
+  line-height: 1.4;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
 }
 
 /* Main Content */
