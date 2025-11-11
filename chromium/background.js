@@ -62,6 +62,45 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 // ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Get the sync service base URL
+ */
+async function getSyncServiceUrl() {
+  try {
+    const result = await chrome.storage.local.get(['syncHost', 'syncPort']);
+    const host = result.syncHost || 'localhost';
+    const port = result.syncPort || '8765';
+    return `http://${host}:${port}/api/v1`;
+  } catch (error) {
+    console.error('[SYNC] Error getting sync service URL:', error);
+    return 'http://localhost:8765/api/v1';
+  }
+}
+
+/**
+ * Get or create session ID for this browser
+ */
+async function getSessionId() {
+  try {
+    let result = await chrome.storage.local.get('sessionId');
+    if (!result.sessionId) {
+      // Generate a new session ID
+      result.sessionId = crypto.randomUUID();
+      await chrome.storage.local.set({ sessionId: result.sessionId });
+      console.log('[SESSION] Created new session ID:', result.sessionId);
+    }
+    return result.sessionId;
+  } catch (error) {
+    console.error('[SESSION] Error getting session ID:', error);
+    // Return a temporary ID
+    return crypto.randomUUID();
+  }
+}
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -1051,8 +1090,28 @@ async function disableDomainSync(domain) {
     // Optionally sync with service
     const { localOnlyMode } = await chrome.storage.local.get('localOnlyMode');
     if (!localOnlyMode) {
-      // TODO: Sync with webform-sync service
-      console.log('[SYNC] Would sync disabled domain to service:', domain);
+      try {
+        const sessionId = await getSessionId();
+        const baseUrl = await getSyncServiceUrl();
+        const response = await fetch(`${baseUrl}/disabled-domains/${encodeURIComponent(domain)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ sessionId })
+        });
+        
+        if (response.ok) {
+          console.log('[SYNC] Disabled domain synced to service:', domain);
+          return { success: true, synced: true };
+        } else {
+          console.warn('[SYNC] Failed to sync disabled domain:', response.status);
+          return { success: true, synced: false, error: `HTTP ${response.status}` };
+        }
+      } catch (syncError) {
+        console.warn('[SYNC] Sync error (domain still disabled locally):', syncError.message);
+        return { success: true, synced: false, error: syncError.message };
+      }
     }
     
     return { success: true, synced: false };
@@ -1079,8 +1138,27 @@ async function enableDomainSync(domain) {
     // Optionally sync with service
     const { localOnlyMode } = await chrome.storage.local.get('localOnlyMode');
     if (!localOnlyMode) {
-      // TODO: Sync with webform-sync service
-      console.log('[SYNC] Would sync enabled domain to service:', domain);
+      try {
+        const sessionId = await getSessionId();
+        const baseUrl = await getSyncServiceUrl();
+        const response = await fetch(`${baseUrl}/disabled-domains/${encodeURIComponent(domain)}?session_id=${encodeURIComponent(sessionId)}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          console.log('[SYNC] Enabled domain synced to service:', domain);
+          return { success: true, synced: true };
+        } else {
+          console.warn('[SYNC] Failed to sync enabled domain:', response.status);
+          return { success: true, synced: false, error: `HTTP ${response.status}` };
+        }
+      } catch (syncError) {
+        console.warn('[SYNC] Sync error (domain still enabled locally):', syncError.message);
+        return { success: true, synced: false, error: syncError.message };
+      }
     }
     
     return { success: true, synced: false };
