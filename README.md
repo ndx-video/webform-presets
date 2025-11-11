@@ -10,11 +10,13 @@ Webform Presets helps you save time filling out repetitive web forms by storing 
 - 🔐 Military-grade encryption (AES-GCM 256-bit)
 - 🚫 Never stores password fields
 - 💾 Local-only storage (no cloud, no sync)
-- 🎯 Context menu integration
-- ⚡ Fast form filling
-- 🔍 Smart field detection
-- 📁 Import/export backups
+- 🎯 Context menu integration (appears only in form fields)
+- ⚡ Fast form filling with two modes (overwrite/update)
+- 🔍 Smart field detection with multi-form support
+- 📁 Import/export with ZIP compression
 - 🔒 Session-based locking
+- 👥 Multi-collection support (multiple password-protected preset groups)
+- 🎨 Modal-free UX with smooth notifications
 
 ## 🚀 Quick Start
 
@@ -46,12 +48,14 @@ Webform Presets helps you save time filling out repetitive web forms by storing 
 
 **Fill a form:**
 1. Navigate to a page with saved presets
-2. Right-click → "Webform Presets" → "Fill with..." → [preset name]
+2. Right-click in a form field → "Webform Presets" → "Fill with..." → [preset name]
 3. Fields are automatically filled!
 
 **Manage presets:**
 - Click extension icon → "Manage Presets"
 - Search, export, import, or delete presets
+- View statistics (collection count, preset count, domains)
+- Export as ZIP files with compression
 
 ## 📁 Project Structure
 
@@ -69,7 +73,7 @@ webform-presets/
 │   └── styles/            # CSS stylesheets
 ├── spec.yml               # Technical specification
 ├── test-form.html         # Test form for development
-├── user-acceptance-tests.md  # Testing guide
+├── UAT.md                 # User Acceptance Testing guide
 ├── .gitignore             # Git ignore rules
 └── README.md              # This file
 ```
@@ -80,6 +84,7 @@ webform-presets/
 - AES-GCM 256-bit encryption for all stored data
 - PBKDF2-SHA256 key derivation (100,000 iterations)
 - Encryption key stored in memory only (never persisted)
+- Each collection is independently encrypted
 
 **Privacy:**
 - All data stays on your device
@@ -90,8 +95,15 @@ webform-presets/
 
 **Session Management:**
 - Automatically locks when browser closes
-- Manual unlock with master password required
+- Manual unlock with collection password required
 - No persistent authentication tokens
+- Support for multiple independent collections (work/personal/etc.)
+
+**Multi-Collection Support:**
+- Create multiple password-protected preset collections
+- Each collection is completely isolated with its own encryption
+- Switch between collections by entering different passwords
+- Useful for separating work and personal data, or different contexts
 
 ## 🛠️ Development
 
@@ -103,7 +115,7 @@ webform-presets/
 ### Testing
 
 1. Use the included `test-form.html` for basic testing
-2. Follow `user-acceptance-tests.md` for comprehensive testing
+2. Follow `UAT.md` for comprehensive testing
 3. Test on real-world forms like dnschecker.org/smtp-test-tool.php
 
 ### Debugging
@@ -129,36 +141,37 @@ See `chromium/README.md` for detailed architecture documentation.
 
 - **[spec.yml](spec.yml)** - Complete technical specification
 - **[chromium/README.md](chromium/README.md)** - Extension development guide
-- **[user-acceptance-tests.md](user-acceptance-tests.md)** - Testing procedures
+- **[UAT.md](UAT.md)** - User Acceptance Testing procedures
 
 ## 🔮 Roadmap
 
-**Current Status: MVP Complete ✅**
+**Current Status: Feature Complete ✅**
 
-All core functionality is implemented and ready for testing:
-- ✅ Save/fill workflows
-- ✅ Encryption system
-- ✅ Context menus
-- ✅ Management console
-- ✅ Import/export
+All core and advanced functionality is implemented:
+- ✅ Save/fill workflows with two modes (overwrite/update)
+- ✅ Encryption system with multi-collection support
+- ✅ Context menus (restricted to form fields only)
+- ✅ Management console with statistics
+- ✅ Import/export with ZIP compression
+- ✅ Modal-free UX with toast notifications
+- ✅ Smart form detection (right-click auto-detects form)
+- ✅ Multi-collection support (multiple password-protected groups)
 
 **Future Enhancements:**
 - Icon design and branding
 - Keyboard shortcuts
-- Fill mode selection UI
-- Enhanced SPA support
+- Enhanced SPA support (React/Vue/Angular)
 - Auto-lock timer
 - Dark mode
-- Statistics dashboard
+- Cloud sync service integration (optional)
 
 ## ⚠️ Known Limitations
 
-- No multi-device sync (by design for security)
-- Manual unlock required each browser session
-- Context menus update on page refresh after saving first preset
-- Basic form detection (may not work with all JavaScript frameworks)
-- No automatic filling on page load
-- No password verification until first decrypt attempt
+- No multi-device sync by default (optional sync service available separately)
+- Manual unlock required each browser session (by design for security)
+- Basic form detection (may not work with all heavily dynamic JavaScript frameworks)
+- No automatic filling on page load (by design for security)
+- Export files contain encrypted data but domain names are visible in metadata
 
 ## 🤝 Contributing
 

@@ -64,71 +64,104 @@ chromium/
 
 - **Secure Storage**: All data stored locally with AES-GCM 256-bit encryption
 - **Password Exclusion**: Never captures or stores password fields
-- **Master Password**: In-memory encryption key derived with PBKDF2 (100,000 iterations)
-- **Context Menu Integration**: Right-click to save or fill forms
-- **Smart Filling**: Overwrite mode fills all fields, Update mode skips modified fields
-- **Management Console**: View, edit, delete, search, and backup presets
+- **Collection Password**: In-memory encryption key derived with PBKDF2 (100,000 iterations)
+- **Multi-Collection Support**: Multiple password-protected preset groups (work/personal/etc.)
+- **Context Menu Integration**: Right-click in form fields to save or fill (restricted to form elements only)
+- **Smart Form Detection**: Automatically detects which form you right-clicked in on multi-form pages
+- **Two Fill Modes**: Overwrite mode fills all fields, Update mode skips modified fields
+- **Management Console**: View, edit, delete, search, and backup presets with statistics
 - **Scope Support**: Save presets for entire domains or specific URLs
 - **Dynamic Menus**: Available presets shown in context menu automatically
+- **Import/Export**: ZIP-compressed backups with data integrity verification
+- **Modal-Free UX**: Toast notifications and two-click confirmations (no alert boxes)
 
 ## Usage
 
 ### First Time Setup
 
 1. Click the extension icon or use a context menu item
-2. You'll be prompted to set a master password on the unlock page
+2. You'll be prompted to set a collection password on the unlock page
 3. Enter a strong password (recommended: use a password manager)
 4. Extension is now unlocked for this browser session
 
+**Multi-Collection Support:**
+- If you enter a password that doesn't match an existing collection, you'll be prompted to create a new collection
+- Each collection is independently encrypted and isolated
+- Useful for separating work and personal data, or different contexts
+
 ### Saving a Form
 
+**Single Form on Page:**
 1. Fill out a form on any website
-2. Right-click anywhere on the page
+2. Right-click in any form field
 3. Select "Webform Presets" → "Save as Preset..."
-4. A modal will appear with:
-   - Preset name field
-   - Scope selection (Domain or Exact URL)
-   - List of detected fields with checkboxes
-5. Choose which fields to include (passwords are automatically excluded)
-6. Click "Save Preset"
-7. Success toast notification will appear
+4. Form is automatically detected from your right-click location
+
+**Multiple Forms on Page:**
+1. Right-click in a field from the form you want to save
+2. Extension automatically detects that specific form
+3. If detection fails, a selection modal appears with intelligently labeled form options
+
+**Save Dialog:**
+- Preset name field
+- Scope selection (Domain or Exact URL)
+- List of detected fields with checkboxes
+- Password fields are automatically excluded
+- Click "Save Preset"
+- Success toast notification appears
 
 ### Filling a Form
 
+**Two Fill Modes:**
+- **Fill (Overwrite)**: Fills all fields, replacing any existing values
+- **Update**: Only fills fields that haven't been modified since page load
+
+**Using Context Menu:**
 1. Navigate to a page with a saved preset
-2. Right-click on the page
+2. Right-click in a form field
 3. Select "Webform Presets" → "Fill with..." → [preset name]
 4. Form fields will be automatically filled
 5. Success toast shows number of fields filled
 
+**Using Popup:**
+1. Click extension icon
+2. View available presets for current page
+3. Click "Fill" or "Update" button on desired preset
+
 ### Managing Presets
 
 1. Click the extension icon → "Manage Presets"
-2. Or right-click → "Webform Presets" → "Manage Presets"
+2. Or right-click in a form field → "Webform Presets" → "Manage Presets"
 3. View all saved presets organized by scope
-4. Use search bar to filter presets
-5. Export presets as encrypted JSON file
-6. Import previously exported presets
-7. Delete individual presets
+
+**Management Features:**
+- Search bar to filter presets
+- Statistics display (collection count, preset count, domains)
+- Export presets as ZIP file (includes JSON + README)
+- Import previously exported ZIP or JSON files
+- Delete individual presets
+- Delete all collections (with two-click confirmation)
+- View usage statistics per preset
 
 ## Security Notes
 
 - **Encryption**: AES-GCM 256-bit encryption for all preset data
 - **Key Derivation**: PBKDF2-SHA256 with 100,000 iterations
 - **In-Memory Key**: Encryption key never written to disk
-- **No Cloud Sync**: All data stays on your device only
+- **No Cloud Sync**: All data stays on your device only (unless using optional sync service)
 - **Session Based**: Automatically locks when browser closes
 - **Password Exclusion**: Password fields never captured or stored
 - **XSS Protection**: All user data is HTML-escaped before rendering
+- **Multi-Collection Isolation**: Each collection encrypted independently with separate keys
 
 ## Known Limitations
 
-- No multi-device sync (by design)
-- Manual unlock required each browser session
-- Context menu updates require page refresh after saving first preset
+- No multi-device sync by default (optional sync service available separately)
+- Manual unlock required each browser session (by design for security)
+- Context menu only appears in form fields (by design for clarity)
 - Form detection may not work with heavily dynamic SPAs
-- No automatic form filling on page load
-- No encrypted master password verification (wrong password won't show error until decrypt fails)
+- No automatic form filling on page load (by design for security)
+- Export files contain encrypted data but domain names are visible in metadata
 
 ## Development
 
@@ -176,15 +209,17 @@ chromium/
 
 - [x] Complete extension boilerplate with Manifest V3
 - [x] AES-GCM encryption with PBKDF2 key derivation
-- [x] Master password unlock system
+- [x] Collection password unlock system
+- [x] Multi-collection support with independent encryption
 - [x] Form detection and data capture
+- [x] Smart form detection (auto-detects from right-click location)
 - [x] Password field exclusion
 - [x] Save preset modal with field selection
-- [x] Fill preset functionality
-- [x] Dynamic context menus showing available presets
-- [x] Management console with search
-- [x] Export/import encrypted presets
-- [x] Toast notification system
+- [x] Fill preset functionality with two modes (overwrite/update)
+- [x] Dynamic context menus showing available presets (restricted to form fields)
+- [x] Management console with search and statistics
+- [x] Export/import with ZIP compression
+- [x] Toast notification system (modal-free UX)
 - [x] Modal UI system with styling isolation
 - [x] Lock/unlock flow
 - [x] Session-based security (key cleared on browser close)
@@ -193,14 +228,13 @@ chromium/
 
 - [ ] Add actual icon files (currently using placeholders)
 - [ ] Keyboard shortcuts for quick access
-- [ ] Fill mode selection (overwrite vs update)
 - [ ] Preset templates and categories
 - [ ] Field mapping/transformation (e.g., "First Name" → "fname")
 - [ ] Auto-lock timer (configurable session timeout)
-- [ ] Enhanced form detection for React/Vue/Angular apps
-- [ ] Preset sharing via encrypted exports with password
+- [ ] Enhanced form detection for complex React/Vue/Angular apps
 - [ ] Statistics dashboard (most used presets, etc.)
 - [ ] Dark mode support
+- [ ] Optional cloud sync integration
 
 ## License
 
