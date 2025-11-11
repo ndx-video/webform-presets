@@ -893,6 +893,81 @@ async function handleGetPresetsForPage(url, sendResponse) {
 }
 
 /**
+ * Sync disabled domains from service (called on init)
+ */
+async function syncDisabledDomains() {
+  try {
+    const { localOnlyMode } = await chrome.storage.local.get('localOnlyMode');
+    if (localOnlyMode) {
+      console.log('[SYNC] Local-only mode, skipping disabled domains sync');
+      return { success: true, synced: false };
+    }
+    
+    // For now, just return success - actual sync service integration can be added later
+    console.log('[SYNC] Disabled domains sync not yet implemented');
+    return { success: true, synced: false };
+  } catch (error) {
+    console.warn('[SYNC] Error syncing disabled domains:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Disable a domain (with optional sync)
+ */
+async function disableDomainSync(domain) {
+  try {
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    
+    if (!disabledDomains.includes(domain)) {
+      disabledDomains.push(domain);
+      await chrome.storage.local.set({ disabledDomains });
+      console.log('[DOMAIN] Disabled:', domain);
+    }
+    
+    // Optionally sync with service
+    const { localOnlyMode } = await chrome.storage.local.get('localOnlyMode');
+    if (!localOnlyMode) {
+      // TODO: Sync with webform-sync service
+      console.log('[SYNC] Would sync disabled domain to service:', domain);
+    }
+    
+    return { success: true, synced: false };
+  } catch (error) {
+    console.error('[DOMAIN] Error disabling domain:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enable a domain (with optional sync)
+ */
+async function enableDomainSync(domain) {
+  try {
+    const { disabledDomains = [] } = await chrome.storage.local.get('disabledDomains');
+    const index = disabledDomains.indexOf(domain);
+    
+    if (index > -1) {
+      disabledDomains.splice(index, 1);
+      await chrome.storage.local.set({ disabledDomains });
+      console.log('[DOMAIN] Enabled:', domain);
+    }
+    
+    // Optionally sync with service
+    const { localOnlyMode } = await chrome.storage.local.get('localOnlyMode');
+    if (!localOnlyMode) {
+      // TODO: Sync with webform-sync service
+      console.log('[SYNC] Would sync enabled domain to service:', domain);
+    }
+    
+    return { success: true, synced: false };
+  } catch (error) {
+    console.error('[DOMAIN] Error enabling domain:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Toggle domain enabled/disabled
  */
 async function handleToggleDomainEnabled(domain, sendResponse) {
