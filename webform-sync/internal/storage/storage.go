@@ -299,7 +299,7 @@ func (s *Storage) CleanupOldPresets(days int) (int, error) {
 // GetSyncLog retrieves sync history for a preset
 func (s *Storage) GetSyncLog(presetID string, limit int) ([]map[string]interface{}, error) {
 	query := `
-	SELECT action, device_id, timestamp
+	SELECT preset_id, action, device_id, timestamp
 	FROM sync_log
 	WHERE preset_id = ?
 	ORDER BY timestamp DESC
@@ -314,13 +314,48 @@ func (s *Storage) GetSyncLog(presetID string, limit int) ([]map[string]interface
 
 	var logs []map[string]interface{}
 	for rows.Next() {
-		var action, deviceID string
+		var presetID, action, deviceID string
 		var timestamp time.Time
-		if err := rows.Scan(&action, &deviceID, &timestamp); err != nil {
+		if err := rows.Scan(&presetID, &action, &deviceID, &timestamp); err != nil {
 			return nil, err
 		}
 
 		logs = append(logs, map[string]interface{}{
+			"preset_id": presetID,
+			"action":    action,
+			"device_id": deviceID,
+			"timestamp": timestamp,
+		})
+	}
+
+	return logs, nil
+}
+
+// GetAllSyncLog retrieves sync history for all presets
+func (s *Storage) GetAllSyncLog(limit int, offset int) ([]map[string]interface{}, error) {
+	query := `
+	SELECT preset_id, action, device_id, timestamp
+	FROM sync_log
+	ORDER BY timestamp DESC
+	LIMIT ? OFFSET ?
+	`
+
+	rows, err := s.db.Query(query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sync log: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []map[string]interface{}
+	for rows.Next() {
+		var presetID, action, deviceID string
+		var timestamp time.Time
+		if err := rows.Scan(&presetID, &action, &deviceID, &timestamp); err != nil {
+			return nil, err
+		}
+
+		logs = append(logs, map[string]interface{}{
+			"preset_id": presetID,
 			"action":    action,
 			"device_id": deviceID,
 			"timestamp": timestamp,
