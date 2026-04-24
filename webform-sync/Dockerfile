@@ -1,5 +1,5 @@
 # Multi-stage build for webform-sync service
-FROM golang:1.21 AS builder
+FROM golang:1.26 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y gcc g++ sqlite3 libsqlite3-dev
